@@ -1,69 +1,72 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { DashboardHeader, type PeriodKey } from "@/components/dashboard/header";
+import { ReviewBanner } from "@/components/dashboard/review-banner";
+import { SummaryCards } from "@/components/dashboard/summary-cards";
+import { CategorySpending } from "@/components/dashboard/category-spending";
+import { SpendingOverTime } from "@/components/dashboard/spending-over-time";
+import { IncomeVsExpenses } from "@/components/dashboard/income-vs-expenses";
+import { BudgetProgress } from "@/components/dashboard/budget-progress";
+import { TransactionsTable } from "@/components/dashboard/transactions-table";
+import { emptyDashboard, type DashboardData } from "@/lib/dashboard";
+
+export default function DashboardPage() {
+  const [period, setPeriod] = useState<PeriodKey>("thisMonth");
+  const [data, setData] = useState<DashboardData>(emptyDashboard("…"));
+  const [dbReady, setDbReady] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/summary?period=${period}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!alive) return;
+        setDbReady(json?.dbReady !== false);
+        setData(json?.data ?? emptyDashboard("—"));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setDbReady(false);
+        setData(emptyDashboard("—"));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [period]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="max-w-[1180px] mx-auto pt-7 px-6 pb-16 max-[520px]:pt-5 max-[520px]:px-3.5 max-[520px]:pb-12">
+      <DashboardHeader
+        period={period}
+        rangeLabel={data.rangeLabel}
+        onPeriodChange={setPeriod}
+      />
+
+      {!dbReady && (
+        <div className="flex items-center gap-2.5 bg-warn/8 border border-warn/35 rounded-md px-4 py-[11px] mb-5 text-[13px]">
+          <span className="w-[7px] h-[7px] rounded-full bg-warn shrink-0" />
+          Couldn't reach the database — check Supabase is configured and
+          you're signed in.
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+
+      <ReviewBanner count={data.reviewCount} />
+
+      <SummaryCards data={data} />
+
+      <div className="grid grid-cols-[1.65fr_1fr] gap-3 items-start mb-3 max-[860px]:grid-cols-1">
+        <div className="flex flex-col gap-3">
+          <CategorySpending categories={data.categories} total={data.expense} />
+          <SpendingOverTime daily={data.daily} axisLabels={data.axisLabels} />
         </div>
-      </main>
+        <div className="flex flex-col gap-3">
+          <IncomeVsExpenses weeks={data.weeks} />
+          <BudgetProgress budgets={data.budgets} />
+        </div>
+      </div>
+
+      <TransactionsTable txns={data.txns} />
     </div>
   );
 }

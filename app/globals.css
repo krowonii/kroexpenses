@@ -1,26 +1,54 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Design tokens — extracted from docs/initial-ui.html (the design reference).
+ * Every screen in this app must stay on these tokens; don't introduce
+ * one-off colors, fonts, or radii in components.
+ */
+
+@theme {
+  /* Surfaces & text */
+  --color-bg: #14181a;
+  --color-surface: #1a1f22;
+  --color-surface-2: #20262a;
+  --color-border: #2a3236;
+  --color-border-soft: #22292d;
+  --color-text: #e9ebea;
+  --color-text-dim: #93999d;
+  --color-text-faint: #5d6467;
+
+  /* Semantic tones */
+  --color-income: #4fb286;
+  --color-expense: #c2694b;
+  --color-net: #6c9bd1;
+  --color-warn: #d9a94f;
+
+  /* Default category palette — custom categories carry their own color */
+  --color-cat-food: #4fb286;
+  --color-cat-shopping: #6c9bd1;
+  --color-cat-bills: #d9a94f;
+  --color-cat-transport: #9b7fc7;
+  --color-cat-entertainment: #c2694b;
+  --color-cat-other: #5d6467;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* Consistent focus ring across the app */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-net);
+  outline-offset: 2px;
 }

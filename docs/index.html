@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Expenses — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #14181a;
+    --surface: #1a1f22;
+    --surface-2: #20262a;
+    --border: #2a3236;
+    --border-soft: #22292d;
+    --text: #e9ebea;
+    --text-dim: #93999d;
+    --text-faint: #5d6467;
+ 
+    --income: #4fb286;
+    --expense: #c2694b;
+    --net: #6c9bd1;
+    --warn: #d9a94f;
+ 
+    --cat-food: #4fb286;
+    --cat-shopping: #6c9bd1;
+    --cat-bills: #d9a94f;
+    --cat-transport: #9b7fc7;
+    --cat-entertainment: #c2694b;
+    --cat-other: #5d6467;
+ 
+    --radius: 6px;
+    --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+ 
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  *, *::before, *::after { box-sizing: inherit; }
+ 
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+ 
+  body { min-height: 100%; }
+ 
+  a { color: inherit; }
+ 
+  .app {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 24px 64px;
+  }
+ 
+  /* ---------- Header ---------- */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+ 
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+ 
+  .brand h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.01em;
+  }
+ 
+  .brand .period-label {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text-faint);
+  }
+ 
+  .period-selector {
+    display: inline-flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 3px;
+    gap: 2px;
+  }
+ 
+  .period-selector button {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+    white-space: nowrap;
+  }
+ 
+  .period-selector button:hover { color: var(--text); }
+ 
+  .period-selector button.active {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+ 
+  .period-selector button:focus-visible,
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--net);
+    outline-offset: 2px;
+  }
+ 
+  /* ---------- Needs review banner ---------- */
+  .review-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: rgba(217, 169, 79, 0.08);
+    border: 1px solid rgba(217, 169, 79, 0.35);
+    border-radius: var(--radius);
+    padding: 11px 16px;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+ 
+  .review-banner:hover { background: rgba(217, 169, 79, 0.13); }
+ 
+  .review-banner .left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13.5px;
+    color: var(--text);
+  }
+ 
+  .review-banner .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--warn);
+    flex: none;
+  }
+ 
+  .review-banner .count {
+    font-family: var(--font-mono);
+    color: var(--warn);
+    font-weight: 500;
+  }
+ 
+  .review-banner .arrow {
+    color: var(--warn);
+    font-size: 14px;
+  }
+ 
+  .review-banner.hidden { display: none; }
+ 
+  /* ---------- Summary cards ---------- */
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+ 
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+ 
+  .card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 2px;
+  }
+ 
+  .card.income::before { background: var(--income); }
+  .card.expense::before { background: var(--expense); }
+  .card.net::before { background: var(--net); }
+ 
+  .card .label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+ 
+  .card .amount {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+ 
+  .card .delta {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+ 
+  .card .delta.up { color: var(--income); }
+  .card .delta.down { color: var(--expense); }
+ 
+  /* ---------- Main grid ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: 1.65fr 1fr;
+    gap: 12px;
+    align-items: start;
+    margin-bottom: 12px;
+  }
+ 
+  .col { display: flex; flex-direction: column; gap: 12px; }
+ 
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 18px 20px;
+  }
+ 
+  .panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+ 
+  .panel-head h2 {
+    font-size: 13.5px;
+    font-weight: 600;
+    margin: 0;
+  }
+ 
+  .panel-head .hint {
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+ 
+  /* ---------- Category bars ---------- */
+  .cat-row {
+    display: grid;
+    grid-template-columns: 100px 1fr 78px;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+  }
+ 
+  .cat-row .name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+ 
+  .cat-row .track {
+    height: 8px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+ 
+  .cat-row .fill {
+    height: 100%;
+    border-radius: 3px;
+  }
+ 
+  .cat-row .value {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text-dim);
+    text-align: right;
+    white-space: nowrap;
+  }
+ 
+  /* ---------- Spending over time (bar chart) ---------- */
+  .bars-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 120px;
+    padding-top: 6px;
+  }
+ 
+  .bars-chart .bar {
+    flex: 1;
+    background: var(--expense);
+    opacity: 0.75;
+    border-radius: 2px 2px 0 0;
+    min-height: 2px;
+    transition: opacity 0.1s ease;
+  }
+ 
+  .bars-chart .bar:hover { opacity: 1; }
+ 
+  .bars-chart-axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+  }
+ 
+  /* ---------- Income vs Expenses ---------- */
+  .ie-rows { display: flex; flex-direction: column; gap: 12px; }
+ 
+  .ie-row .ie-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+    font-family: var(--font-mono);
+  }
+ 
+  .ie-bar-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+ 
+  .ie-bar-track {
+    height: 7px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+ 
+  .ie-bar-fill { height: 100%; border-radius: 3px; }
+  .ie-bar-fill.income { background: var(--income); }
+  .ie-bar-fill.expense { background: var(--expense); }
+ 
+  .ie-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 4px;
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+ 
+  .ie-legend span { display: inline-flex; align-items: center; gap: 6px; }
+ 
+  .swatch {
+    width: 8px; height: 8px; border-radius: 2px; display: inline-block;
+  }
+ 
+  /* ---------- Budget progress ---------- */
+  .budget-row { margin-bottom: 14px; }
+  .budget-row:last-child { margin-bottom: 0; }
+ 
+  .budget-row .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+ 
+  .budget-row .name { font-size: 13px; color: var(--text); }
+ 
+  .budget-row .fig {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
+ 
+  .budget-row .track {
+    height: 6px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+ 
+  .budget-row .fill { height: 100%; border-radius: 3px; }
+  .budget-row .fill.ok { background: var(--income); }
+  .budget-row .fill.warn { background: var(--warn); }
+  .budget-row .fill.over { background: var(--expense); }
+ 
+  .budget-row .status {
+    font-size: 10.5px;
+    margin-top: 4px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+  .budget-row .status.over { color: var(--expense); }
+ 
+  .empty-note {
+    font-size: 12.5px;
+    color: var(--text-faint);
+    padding: 8px 0 2px;
+  }
+ 
+  /* ---------- Recent transactions ---------- */
+  .txn-panel { margin-bottom: 0; }
+ 
+  .view-all {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .view-all:hover { color: var(--text); }
+ 
+  table.txn-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+ 
+  .txn-table thead th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 11px;
+    color: var(--text-faint);
+    padding: 0 10px 8px 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+ 
+  .txn-table thead th.num { text-align: right; }
+ 
+  .txn-table tbody td {
+    padding: 10px 10px 10px 0;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text);
+    white-space: nowrap;
+  }
+ 
+  .txn-table tbody tr:last-child td { border-bottom: none; }
+ 
+  .txn-table td.date {
+    font-family: var(--font-mono);
+    color: var(--text-faint);
+    font-size: 12px;
+  }
+ 
+  .txn-table td.merchant { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+ 
+  .txn-table td.category .pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 100px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+  }
+ 
+  .txn-table td.amount {
+    font-family: var(--font-mono);
+    text-align: right;
+  }
+  .txn-table td.amount.pos { color: var(--income); }
+  .txn-table td.amount.neg { color: var(--text); }
+ 
+  .txn-table td.account { color: var(--text-faint); font-size: 12px; }
+ 
+  .txn-scroll { overflow-x: auto; }
+ 
+  /* ---------- Responsive ---------- */
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+    .summary { grid-template-columns: 1fr; }
+  }
+ 
+  @media (max-width: 520px) {
+    .app { padding: 20px 14px 48px; }
+    .header { align-items: flex-start; }
+    .cat-row { grid-template-columns: 78px 1fr 66px; }
+    .card .amount { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+ 
+  <div class="header">
+    <div class="brand">
+      <h1>Expenses</h1>
+      <span class="period-label" id="periodRangeLabel">Sep 1 – Sep 30, 2026</span>
+    </div>
+    <div class="period-selector" role="tablist" aria-label="Period">
+      <button class="active" data-period="thisMonth">This month</button>
+      <button data-period="lastMonth">Last month</button>
+      <button data-period="custom">Custom range</button>
+    </div>
+  </div>
+ 
+  <div class="review-banner" id="reviewBanner" role="button" tabindex="0">
+    <div class="left">
+      <span class="dot"></span>
+      <span><span class="count" id="reviewCount">3</span> transactions need your review</span>
+    </div>
+    <span class="arrow">→</span>
+  </div>
+ 
+  <div class="summary">
+    <div class="card income">
+      <div class="label">Income</div>
+      <div class="amount" id="sumIncome">₱35,000</div>
+      <div class="delta up" id="sumIncomeDelta">↑ 4% vs last month</div>
+    </div>
+    <div class="card expense">
+      <div class="label">Expenses</div>
+      <div class="amount" id="sumExpense">₱21,450</div>
+      <div class="delta down" id="sumExpenseDelta">↑ 9% vs last month</div>
+    </div>
+    <div class="card net">
+      <div class="label">Net</div>
+      <div class="amount" id="sumNet">₱13,550</div>
+      <div class="delta" id="sumNetDelta">↓ 3% vs last month</div>
+    </div>
+  </div>
+ 
+  <div class="grid">
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Spending by category</h2>
+          <span class="hint">of ₱21,450</span>
+        </div>
+        <div id="catList"></div>
+      </div>
+ 
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Spending over time</h2>
+          <span class="hint">daily</span>
+        </div>
+        <div class="bars-chart" id="timeBars"></div>
+        <div class="bars-chart-axis">
+          <span>Sep 1</span>
+          <span>Sep 10</span>
+          <span>Sep 20</span>
+          <span>Sep 30</span>
+        </div>
+      </div>
+    </div>
+ 
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Income vs expenses</h2>
+          <span class="hint">by week</span>
+        </div>
+        <div class="ie-rows" id="ieRows"></div>
+        <div class="ie-legend">
+          <span><span class="swatch" style="background:var(--income)"></span>Income</span>
+          <span><span class="swatch" style="background:var(--expense)"></span>Expenses</span>
+        </div>
+      </div>
+ 
+      <div class="panel" id="budgetPanel">
+        <div class="panel-head">
+          <h2>Budget progress</h2>
+        </div>
+        <div id="budgetList"></div>
+      </div>
+    </div>
+  </div>
+ 
+  <div class="panel txn-panel">
+    <div class="panel-head">
+      <h2>Recent transactions</h2>
+      <a class="view-all" href="#">View all →</a>
+    </div>
+    <div class="txn-scroll">
+      <table class="txn-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Merchant</th>
+            <th>Category</th>
+            <th class="num">Amount</th>
+            <th>Account</th>
+          </tr>
+        </thead>
+        <tbody id="txnBody"></tbody>
+      </table>
+    </div>
+  </div>
+ 
+</div>
+ 
+<script>
+  const peso = (n) => {
+    const sign = n < 0 ? '-' : '';
+    return sign + '₱' + Math.abs(n).toLocaleString('en-PH', { maximumFractionDigits: 0 });
+  };
+ 
+  const catColor = {
+    'Food': 'var(--cat-food)',
+    'Shopping': 'var(--cat-shopping)',
+    'Bills': 'var(--cat-bills)',
+    'Transportation': 'var(--cat-transport)',
+    'Entertainment': 'var(--cat-entertainment)',
+    'Other': 'var(--cat-other)'
+  };
+ 
+  const DATA = {
+    thisMonth: {
+      rangeLabel: 'Sep 1 – Sep 30, 2026',
+      income: 35000, expense: 21450, net: 13550,
+      incomeDelta: '↑ 4% vs last month', expenseDelta: '↑ 9% vs last month', netDelta: '↓ 3% vs last month',
+      reviewCount: 3,
+      categories: [
+        { name: 'Food', amount: 6200, pct: 28.9 },
+        { name: 'Shopping', amount: 4500, pct: 21.0 },
+        { name: 'Bills', amount: 4000, pct: 18.6 },
+        { name: 'Transportation', amount: 3100, pct: 14.5 },
+        { name: 'Entertainment', amount: 2100, pct: 9.8 },
+        { name: 'Other', amount: 1550, pct: 7.2 },
+      ],
+      daily: [320,180,540,90,610,200,150,430,380,720,110,260,340,590,180,90,410,660,220,140,380,300,520,180,90,610,240,380,160,690],
+      weeks: [
+        { label: 'Week 1', income: 17500, expense: 5200 },
+        { label: 'Week 2', income: 0, expense: 6100 },
+        { label: 'Week 3', income: 17500, expense: 4800 },
+        { label: 'Week 4', income: 0, expense: 5350 },
+      ],
+      budgets: [
+        { name: 'Food', spent: 6200, limit: 7000 },
+        { name: 'Shopping', spent: 4500, limit: 3500 },
+        { name: 'Transportation', spent: 3100, limit: 3000 },
+      ],
+      txns: [
+        { date: 'Sep 20', merchant: 'Jollibee', category: 'Food', amount: -285, account: 'GCash' },
+        { date: 'Sep 20', merchant: 'Grab', category: 'Transportation', amount: -180, account: 'GCash' },
+        { date: 'Sep 19', merchant: 'Netflix', category: 'Subscriptions', amount: -549, account: 'Credit Card' },
+        { date: 'Sep 19', merchant: 'Salary', category: 'Income', amount: 17500, account: 'BDO Savings' },
+        { date: 'Sep 18', merchant: 'SM Supermarket', category: 'Shopping', amount: -2340, account: 'Credit Card' },
+        { date: 'Sep 17', merchant: 'Meralco', category: 'Bills', amount: -3200, account: 'BDO Savings' },
+        { date: 'Sep 16', merchant: 'Shopee', category: 'Shopping', amount: -890, account: 'GCash' },
+        { date: 'Sep 15', merchant: 'Judo Philippines', category: 'Judo', amount: -1500, account: 'GCash' },
+      ]
+    },
+    lastMonth: {
+      rangeLabel: 'Aug 1 – Aug 31, 2026',
+      income: 33600, expense: 19680, net: 13920,
+      incomeDelta: '↑ 1% vs Jul', expenseDelta: '↓ 3% vs Jul', netDelta: '↑ 5% vs Jul',
+      reviewCount: 0,
+      categories: [
+        { name: 'Food', amount: 5100, pct: 25.9 },
+        { name: 'Bills', amount: 4200, pct: 21.3 },
+        { name: 'Shopping', amount: 3600, pct: 18.3 },
+        { name: 'Transportation', amount: 2900, pct: 14.7 },
+        { name: 'Entertainment', amount: 2380, pct: 12.1 },
+        { name: 'Other', amount: 1500, pct: 7.6 },
+      ],
+      daily: [210,340,120,480,260,90,610,180,330,420,150,270,510,90,340,180,220,460,310,140,90,380,260,510,180,90,420,310,180,240],
+      weeks: [
+        { label: 'Week 1', income: 16800, expense: 4600 },
+        { label: 'Week 2', income: 0, expense: 5400 },
+        { label: 'Week 3', income: 16800, expense: 4980 },
+        { label: 'Week 4', income: 0, expense: 4700 },
+      ],
+      budgets: [
+        { name: 'Food', spent: 5100, limit: 7000 },
+        { name: 'Shopping', spent: 3600, limit: 3500 },
+        { name: 'Transportation', spent: 2900, limit: 3000 },
+      ],
+      txns: [
+        { date: 'Aug 30', merchant: 'Jollibee', category: 'Food', amount: -260, account: 'GCash' },
+        { date: 'Aug 28', merchant: 'Meralco', category: 'Bills', amount: -3100, account: 'BDO Savings' },
+        { date: 'Aug 25', merchant: 'Grab', category: 'Transportation', amount: -220, account: 'GCash' },
+        { date: 'Aug 19', merchant: 'Salary', category: 'Income', amount: 16800, account: 'BDO Savings' },
+        { date: 'Aug 14', merchant: 'Shopee', category: 'Shopping', amount: -1120, account: 'GCash' },
+        { date: 'Aug 10', merchant: 'Netflix', category: 'Subscriptions', amount: -549, account: 'Credit Card' },
+      ]
+    },
+    custom: {
+      rangeLabel: 'Aug 15 – Sep 15, 2026',
+      income: 24300, expense: 17960, net: 6340,
+      incomeDelta: '— custom range', expenseDelta: '— custom range', netDelta: '— custom range',
+      reviewCount: 5,
+      categories: [
+        { name: 'Food', amount: 5400, pct: 30.1 },
+        { name: 'Shopping', amount: 3900, pct: 21.7 },
+        { name: 'Bills', amount: 3600, pct: 20.0 },
+        { name: 'Transportation', amount: 2560, pct: 14.3 },
+        { name: 'Entertainment', amount: 1500, pct: 8.4 },
+        { name: 'Other', amount: 1000, pct: 5.5 },
+      ],
+      daily: [180,420,300,90,540,260,180,310,460,120,270,390,180,610,240,90,340,480,220,140,380,300,190,420,180,90,310,240,160,290,200],
+      weeks: [
+        { label: 'Week 1', income: 8750, expense: 4100 },
+        { label: 'Week 2', income: 8750, expense: 4600 },
+        { label: 'Week 3', income: 0, expense: 4560 },
+        { label: 'Week 4', income: 6800, expense: 4700 },
+      ],
+      budgets: [],
+      txns: [
+        { date: 'Sep 14', merchant: 'Jollibee', category: 'Food', amount: -240, account: 'GCash' },
+        { date: 'Sep 10', merchant: 'Grab', category: 'Transportation', amount: -160, account: 'GCash' },
+        { date: 'Sep 5', merchant: 'SM Supermarket', category: 'Shopping', amount: -1980, account: 'Credit Card' },
+        { date: 'Aug 30', merchant: 'Meralco', category: 'Bills', amount: -3000, account: 'BDO Savings' },
+        { date: 'Aug 19', merchant: 'Salary', category: 'Income', amount: 17500, account: 'BDO Savings' },
+      ]
+    }
+  };
+ 
+  function render(periodKey) {
+    const d = DATA[periodKey];
+ 
+    document.getElementById('periodRangeLabel').textContent = d.rangeLabel;
+    document.getElementById('sumIncome').textContent = peso(d.income);
+    document.getElementById('sumExpense').textContent = peso(d.expense);
+    document.getElementById('sumNet').textContent = peso(d.net);
+    document.getElementById('sumIncomeDelta').textContent = d.incomeDelta;
+    document.getElementById('sumExpenseDelta').textContent = d.expenseDelta;
+    document.getElementById('sumNetDelta').textContent = d.netDelta;
+ 
+    const banner = document.getElementById('reviewBanner');
+    if (d.reviewCount > 0) {
+      banner.classList.remove('hidden');
+      document.getElementById('reviewCount').textContent = d.reviewCount;
+    } else {
+      banner.classList.add('hidden');
+    }
+ 
+    const catList = document.getElementById('catList');
+    catList.innerHTML = d.categories.map(c => `
+      <div class="cat-row">
+        <div class="name">${c.name}</div>
+        <div class="track"><div class="fill" style="width:${c.pct}%; background:${catColor[c.name] || 'var(--cat-other)'}"></div></div>
+        <div class="value">${peso(c.amount)} · ${c.pct.toFixed(0)}%</div>
+      </div>
+    `).join('');
+ 
+    const maxDay = Math.max(...d.daily);
+    const timeBars = document.getElementById('timeBars');
+    timeBars.innerHTML = d.daily.map(v => `<div class="bar" style="height:${Math.max((v / maxDay) * 100, 3)}%"></div>`).join('');
+ 
+    const maxWeek = Math.max(...d.weeks.map(w => Math.max(w.income, w.expense)));
+    const ieRows = document.getElementById('ieRows');
+    ieRows.innerHTML = d.weeks.map(w => `
+      <div class="ie-row">
+        <div class="ie-label">${w.label}</div>
+        <div class="ie-bar-pair">
+          <div class="ie-bar-track"><div class="ie-bar-fill income" style="width:${maxWeek ? (w.income / maxWeek) * 100 : 0}%"></div></div>
+          <div class="ie-bar-track"><div class="ie-bar-fill expense" style="width:${maxWeek ? (w.expense / maxWeek) * 100 : 0}%"></div></div>
+        </div>
+      </div>
+    `).join('');
+ 
+    const budgetList = document.getElementById('budgetList');
+    if (!d.budgets || d.budgets.length === 0) {
+      budgetList.innerHTML = `<div class="empty-note">No budgets set for this period.</div>`;
+    } else {
+      budgetList.innerHTML = d.budgets.map(b => {
+        const pct = (b.spent / b.limit) * 100;
+        const state = pct > 100 ? 'over' : pct > 85 ? 'warn' : 'ok';
+        const statusText = pct > 100
+          ? `${peso(b.spent - b.limit)} over budget`
+          : `${(100 - pct).toFixed(0)}% left`;
+        return `
+          <div class="budget-row">
+            <div class="top">
+              <span class="name">${b.name}</span>
+              <span class="fig">${peso(b.spent)} / ${peso(b.limit)}</span>
+            </div>
+            <div class="track"><div class="fill ${state}" style="width:${Math.min(pct, 100)}%"></div></div>
+            <div class="status ${state === 'over' ? 'over' : ''}">${statusText}</div>
+          </div>
+        `;
+      }).join('');
+    }
+ 
+    const txnBody = document.getElementById('txnBody');
+    txnBody.innerHTML = d.txns.map(t => `
+      <tr>
+        <td class="date">${t.date}</td>
+        <td class="merchant">${t.merchant}</td>
+        <td class="category"><span class="pill">${t.category}</span></td>
+        <td class="amount ${t.amount > 0 ? 'pos' : 'neg'}">${t.amount > 0 ? '+' : ''}${peso(t.amount)}</td>
+        <td class="account">${t.account}</td>
+      </tr>
+    `).join('');
+  }
+ 
+  document.querySelectorAll('.period-selector button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.period-selector button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      render(btn.dataset.period);
+    });
+  });
+ 
+  render('thisMonth');
+</script>
+</body>
+</html>
+ 

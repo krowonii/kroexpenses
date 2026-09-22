@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Expenses
 
-## Getting Started
+Personal expenses tracker: statement imports (BDO / GCash / Credit Card),
+transfer reconciliation, AI categorization with confidence-based review, and
+a financial dashboard.
 
-First, run the development server:
+- **Source of truth**: `docs/expenses-masterdoc.pdf` — read it before changing scope.
+- **Design reference**: `docs/initial-ui.html` — every screen must stay on its
+  design tokens, which live in `app/globals.css` (`@theme` block).
+
+## Stack
+
+Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · Supabase
+(Postgres / Auth / Storage) · Zod · SheetJS xlsx (CSV + XLSX parsing) ·
+Google GenAI SDK (categorization) · Recharts · Vercel.
+
+## Getting started
 
 ```bash
+npm install
+cp .env.example .env.local   # fill in Supabase URL + anon key
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Apply the database schema in the Supabase SQL editor: `supabase/schema.sql`,
+then `supabase/seed-trigger.sql` (a trigger auto-seeds starter accounts +
+categories the moment a user signs up — no manual setup). Auth is wired up:
+sign in once at `/login` and the session persists — `proxy.ts` refreshes it
+and protects the routes, so the app recognizes you on every boot. The import
+screen runs fully (real parsing/processing counts) in preview-only mode
+until the database is connected; the dashboard and review queue run on
+real data — empty states until transactions are in.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/                  # routes: dashboard (/), login, import, review, accounts, transactions
+app/api/import/       # detect (inspect uploads), process (run pipeline), history
+app/api/accounts/     # active accounts for the import screen
+app/api/summary/      # dashboard aggregates (totals, categories, series)
+app/api/review/       # review queue (GET items) + decisions (POST)
+components/
+  ui.tsx              # shared primitives: Panel, PanelHead, Card, PageShell
+  auth/               # sign-out control
+  dashboard/          # dashboard sections (header, summary, charts, table, …)
+  import/             # upload area, file review, processing state, summary, history
+  review/             # review board (confirm/correct + unmatched transfers)
+lib/
+  types.ts            # domain model: Transaction, Account, Category, statuses
+  defaults.ts         # starter accounts + categories (used until the DB is ready)
+  import/             # the import pipeline, UI-independent:
+                      #   parse (SheetJS), detect (source/account), normalize,
+                      #   dedupe (sha256 keys), reconcile (transfers + fees),
+                      #   categorize (rules → LLM), pipeline, db-context
+  format.ts           # peso formatting
+  dashboard.ts        # dashboard view model + period ranges
+  supabase/           # browser + server clients (cookie-session auth)
+proxy.ts              # session refresh + route protection (Next 16 proxy)
+supabase/schema.sql   # database schema + RLS
+supabase/seed-trigger.sql  # auto-seeds accounts + categories on sign-up
+```
 
-## Learn More
+## Not in MVP
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Bank API integrations, balance sync, net worth, investments, forecasting,
+receipt OCR, multi-user, mobile app, complex budgeting.

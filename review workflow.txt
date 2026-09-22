@@ -1,0 +1,5 @@
+review page - ai gives the most likely categories it could be
+
+ex: grab: confidence 90%
+
+select category: transportation, food, coffee, other [select your own]
