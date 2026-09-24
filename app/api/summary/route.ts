@@ -4,6 +4,7 @@ import {
   delta,
   emptyDashboard,
   MONTH_SHORT,
+  type DailyPoint,
   type DashboardData,
   type PeriodKey,
 } from "@/lib/dashboard";
@@ -117,7 +118,10 @@ export async function GET(request: Request) {
       dateList.push(new Date(startMs + i * 86_400_000).toISOString().slice(0, 10));
     }
 
-    const daily = dateList.map((d) => round2(byDayOut.get(d) ?? 0));
+    const daily: DailyPoint[] = dateList.map((d) => ({
+      date: d,
+      amount: round2(byDayOut.get(d) ?? 0),
+    }));
     const n = daily.length;
     const axisLabels = [
       ...new Set(

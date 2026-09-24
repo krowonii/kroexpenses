@@ -156,12 +156,15 @@ async function saveBatch(
   }
 ): Promise<{ saved: boolean; note?: string }> {
   const { createClient } = await import("@/lib/supabase/server");
+  const { getUserId } = await import("@/lib/supabase/server");
   const supabase = await createClient();
+  const userId = await getUserId();
 
   try {
     const { data: importRow, error: importError } = await supabase
       .from("imports")
       .insert({
+        user_id: userId,
         file_name: meta.fileNames.join(", "),
         new_count: txns.length,
         duplicate_count: meta.duplicateCount,
@@ -176,6 +179,7 @@ async function saveBatch(
 
     // Insert transactions first (without links), then patch the transfer pairs.
     const rows = txns.map((t) => ({
+      user_id: userId,
       account_id: t.account_id,
       txn_date: t.txn_date,
       amount: t.amount,
@@ -219,6 +223,15 @@ async function saveBatch(
   }
 }
 
+/** Unwrap an error into a readable message — Supabase returns PostgREST
+ *  error objects (not Error instances), so String() alone gives
+ *  "[object Object]". */
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const e = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const parts = [e.message, e.details, e.hint].filter((p) => typeof p === "string" && p);
+    if (parts.length > 0) return parts.join(" — ");
+  }
+  return String(error);
 }

@@ -34,9 +34,13 @@ export async function GET() {
       supabase
         .from("transactions")
         .select(
-          "id,txn_date,amount,txn_type,status,confidence,merchant,description,category:categories(id,name),account:accounts(name)"
+          "id,txn_date,amount,txn_type,status,direction,confidence,merchant,description,category:categories(id,name),account:accounts(name)"
         )
-        .in("status", ["pending_review", "unmatched"])
+        // pending_review + unmatched, plus any expense that ended up with
+        // no category at all (an interrupted AI pass, or a later category
+        // delete nulling category_id) — those need the user too, and a
+        // re-import can't fix them (dedupe skips already-imported rows).
+        .or("status.in.(pending_review,unmatched),and(txn_type.eq.expense,category_id.is.null)")
         .order("txn_date", { ascending: false }),
       supabase.from("categories").select("id,name,color").order("sort_order"),
     ]);
@@ -69,7 +73,9 @@ export async function POST(request: Request) {
     }
 
     const { createClient } = await import("@/lib/supabase/server");
+    const { getUserId } = await import("@/lib/supabase/server");
     const supabase = await createClient();
+    const userId = await getUserId();
 
     if (body.action === "transfer") {
       const { error } = await supabase
@@ -93,7 +99,7 @@ export async function POST(request: Request) {
     // category or a usable merchant.
     if (body.categoryId) {
       const merchant = (updated?.merchant ?? "").trim();
-      if (merchant && merchant !== "Unknown" && merchant !== "Transfer fee") {
+      if (merchant && merchant !== "Unknown" && merchant !== "Transfer fee" && merchant !== "Manual entry") {
         const pattern = escapePattern(merchant);
         const { data: existing } = await supabase
           .from("categorization_rules")
@@ -102,7 +108,9 @@ export async function POST(request: Request) {
           .eq("category_id", body.categoryId)
           .limit(1);
         if (!existing || existing.length === 0) {
-          await supabase.from("categorization_rules").insert({ pattern, category_id: body.categoryId });
+          await supabase
+            .from("categorization_rules")
+            .insert({ user_id: userId, pattern, category_id: body.categoryId });
         }
       }
     }

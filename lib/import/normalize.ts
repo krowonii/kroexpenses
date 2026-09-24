@@ -22,6 +22,51 @@ function merchantFrom(description: string): string {
 }
 
 /**
+ * GCash statement wording: payments read "Payment to X", bank cash-ins/
+ * outs read "Received/Sent GCash from/to <bank> with account ending in
+ * NNNN …", and wallet-to-wallet moves read "Transfer from NNN to NNN".
+ */
+function gcashMerchant(description: string): string {
+  let m = /^payment to (.+)$/i.exec(description);
+  if (m) return m[1].trim().slice(0, 60);
+  m = /^(?:sent|received) gcash (?:to|from) (.+?)(?:\s+with account ending.*)?$/i.exec(
+    description
+  );
+  if (m) return m[1].trim().slice(0, 60);
+  if (/^transfer from [\d\s]+ to [\d\s]+$/i.test(description)) return "GCash transfer";
+  return merchantFrom(description);
+}
+
+/**
+ * Stitch a wrapped description: GCash moves a too-long description into
+ * fragment rows (text, but no date, debit, credit, or balance) around the
+ * data row — gather them from both sides and join. Bounded so a fragment
+ * never reaches past its own wrap.
+ */
+function stitchDescription(
+  rows: string[][],
+  rowIndex: number,
+  cols: { date: number; desc: number; debit: number; credit: number; balance: number }
+): string {
+  const isFragment = (row: string[] | undefined) =>
+    !!row &&
+    !!(row[cols.desc] ?? "").trim() &&
+    !(row[cols.date] ?? "").trim() &&
+    !(row[cols.debit] ?? "").trim() &&
+    !(row[cols.credit] ?? "").trim() &&
+    !(row[cols.balance] ?? "").trim();
+
+  const parts: string[] = [];
+  for (let i = rowIndex - 1; isFragment(rows[i]) && rowIndex - i <= 3; i--) {
+    parts.unshift((rows[i][cols.desc] ?? "").trim());
+  }
+  for (let i = rowIndex + 1; isFragment(rows[i]) && i - rowIndex <= 3; i++) {
+    parts.push((rows[i][cols.desc] ?? "").trim());
+  }
+  return parts.join(" ");
+}
+
+/**
  * BDO statement wording. Transfers carry a raw description that is pure
  * bank jargon ("POB IBFT BN-2026… IBTW") while the counter-party column
  * names the channel — the counter party is the readable one. POS purchases
@@ -71,6 +116,7 @@ export function normalizeFile(
   const creditCol = hasIndicator
     ? -1
     : findColumn(headers, /(credit|deposit|money in|receive)/i);
+  const balanceCol = findColumn(headers, /balance/i);
 
   const txns: NormalizedTxn[] = [];
 
@@ -116,6 +162,13 @@ export function normalizeFile(
     const rawDescription =
       (descCol >= 0 ? row[descCol] : "") ||
       (typeCol >= 0 ? row[typeCol] : "") ||
+      stitchDescription(parsed.rows, i, {
+        date: dateCol,
+        desc: descCol,
+        debit: debitCol,
+        credit: creditCol,
+        balance: balanceCol,
+      }) ||
       "Unknown";
     const description = hasIndicator
       ? bdoDescription(
@@ -132,7 +185,7 @@ export function normalizeFile(
       txn_date: date,
       amount,
       direction,
-      merchant: merchantFrom(description),
+      merchant: opts.source === "gcash" ? gcashMerchant(description) : merchantFrom(description),
       description: description.trim(),
       txn_type: direction === "out" ? "expense" : "income",
       // Expenses stay pending_review until categorized; income is

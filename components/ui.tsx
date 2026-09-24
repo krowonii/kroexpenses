@@ -1,10 +1,28 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 /**
  * Shared surface primitives. Styling mirrors docs/initial-ui.html —
  * keep new screens on these instead of restyling from scratch.
  */
+
+/** Pulse placeholder bar for loading states — surface-2 fill with the
+ *  standard small radius; size it with classes (or `style` for % heights). */
+export function Skeleton({
+  className = "",
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      aria-hidden
+      className={`bg-surface-2 animate-pulse rounded-[3px] ${className}`}
+      style={style}
+    />
+  );
+}
 
 /** Bordered surface panel with the standard 18px padding. */
 export function Panel({
@@ -23,20 +41,38 @@ export function Panel({
   );
 }
 
-/** Panel title row: h2 on the left, optional hint on the right. */
+/** Panel title row: h2 on the left, optional hint and/or action on the
+ *  right. */
 export function PanelHead({
   title,
   hint,
+  action,
 }: {
   title: string;
   hint?: string;
+  action?: ReactNode;
 }) {
   return (
     <div className="flex items-baseline justify-between mb-3.5">
       <h2 className="text-[13.5px] font-semibold">{title}</h2>
-      {hint ? <span className="text-[11.5px] text-text-faint">{hint}</span> : null}
+      {hint || action ? (
+        <div className="flex items-center gap-3">
+          {hint ? <span className="text-[11.5px] text-text-faint">{hint}</span> : null}
+          {action}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/** Selectable chip — the one-tap picker buttons (categories, accounts,
+ *  filters) shared across screens. */
+export function chipClass(selected: boolean) {
+  return `rounded-full px-3 py-1.5 text-[12.5px] border transition-colors ${
+    selected
+      ? "border-net bg-net/10 text-text font-medium"
+      : "border-border-soft bg-surface-2 text-text-dim hover:text-text"
+  }`;
 }
 
 export type CardTone = "income" | "expense" | "net";

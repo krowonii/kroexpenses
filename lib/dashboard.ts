@@ -6,6 +6,13 @@
 
 export type PeriodKey = "thisMonth" | "lastMonth" | "custom";
 
+/** One day's spending for the "Spending over time" chart — the ISO date
+ *  it falls on plus the summed amount (so each bar's hover can name it). */
+export interface DailyPoint {
+  date: string;
+  amount: number;
+}
+
 export interface DashboardData {
   rangeLabel: string;
   income: number;
@@ -16,7 +23,7 @@ export interface DashboardData {
   netDelta: string;
   reviewCount: number;
   categories: { name: string; amount: number; pct: number; color?: string | null }[];
-  daily: number[];
+  daily: DailyPoint[];
   axisLabels: string[];
   weeks: { label: string; income: number; expense: number }[];
   budgets: { name: string; spent: number; limit: number }[];
@@ -63,7 +70,7 @@ function rangeLabel(from: Date, to: Date): string {
 }
 
 /** Today in Asia/Manila as an ISO date string (en-CA renders YYYY-MM-DD). */
-function todayIso(): string {
+export function todayIso(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
 }
 

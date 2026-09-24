@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { SignOut } from "@/components/auth/sign-out";
+import { SettingsCog } from "@/components/settings/settings-cog";
 
 const PERIODS = [
   { key: "thisMonth", label: "This month" },
@@ -54,7 +54,7 @@ export function DashboardHeader({
               {p.label}
             </button>
           ))}
-          <SignOut />
+          <SettingsCog />
         </div>
       </div>
     </div>

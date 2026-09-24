@@ -48,9 +48,18 @@ export function detectFile(parsed: ParsedFile): DetectedFile {
   const headerIndex = findHeaderIndex(parsed.rows);
   const headers = headerIndex >= 0 ? parsed.rows[headerIndex] : [];
   // Content sniff: BDO exports carry a credit/debit indicator column, so
-  // an export whose name doesn't say BDO still resolves to it.
+  // an export whose name doesn't say BDO still resolves to it. GCash
+  // exports carry a "GCash Transaction History" title row instead.
   if (source === "other" && findColumn(headers, /credit\/debit/i) >= 0) {
     source = "bdo";
+  }
+  if (
+    source === "other" &&
+    parsed.rows
+      .slice(0, 3)
+      .some((row) => row.some((cell) => /gcash/i.test(cell)))
+  ) {
+    source = "gcash";
   }
   const dateCol = findColumn(headers, /date|posted/i);
 

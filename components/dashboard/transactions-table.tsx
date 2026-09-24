@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Panel } from "@/components/ui";
 import { signedPeso } from "@/lib/format";
 
@@ -17,21 +18,36 @@ const tdBase = "pt-2.5 pb-2.5 pr-2.5 whitespace-nowrap";
 const td = (isLast: boolean) =>
   isLast ? tdBase : `${tdBase} border-b border-border-soft`;
 
-export function TransactionsTable({ txns }: { txns: TxnRow[] }) {
+export function TransactionsTable({
+  txns,
+  showHeader = true,
+  emptyHint = "No transactions yet — import a statement to get started.",
+  footer,
+}: {
+  txns: TxnRow[];
+  /** False hides the "Recent transactions" + "View all →" head (the full
+   *  ledger page renders its own filters instead). */
+  showHeader?: boolean;
+  emptyHint?: string;
+  /** Rendered inside the panel below the table — pagination on the ledger. */
+  footer?: ReactNode;
+}) {
   return (
     <Panel>
-      <div className="flex items-baseline justify-between mb-3.5">
-        <h2 className="text-[13.5px] font-semibold">Recent transactions</h2>
-        <Link
-          href="/transactions"
-          className="text-[12.5px] text-text-dim hover:text-text"
-        >
-          View all →
-        </Link>
-      </div>
+      {showHeader && (
+        <div className="flex items-baseline justify-between mb-3.5">
+          <h2 className="text-[13.5px] font-semibold">Recent transactions</h2>
+          <Link
+            href="/transactions"
+            className="text-[12.5px] text-text-dim hover:text-text"
+          >
+            View all →
+          </Link>
+        </div>
+      )}
       {txns.length === 0 ? (
         <div className="text-[12.5px] text-text-faint pt-1 pb-0.5">
-          No transactions yet — import a statement to get started.
+          {emptyHint}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -75,6 +91,7 @@ export function TransactionsTable({ txns }: { txns: TxnRow[] }) {
           </table>
         </div>
       )}
+      {footer}
     </Panel>
   );
 }

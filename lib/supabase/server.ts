@@ -26,3 +26,12 @@ export async function createClient() {
     }
   );
 }
+
+/** The signed-in user's id. Inserts need it explicitly: user_id is not
+ *  null with no default, and RLS's with-check rejects rows without it. */
+export async function getUserId(): Promise<string> {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) throw new Error("Not signed in");
+  return data.user.id;
+}

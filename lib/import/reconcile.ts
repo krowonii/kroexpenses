@@ -6,10 +6,10 @@ const MAX_FEE = 100;
 const DATE_WINDOW_DAYS = 3;
 
 /** Transfer-like wording that, WITHOUT a counterpart, means external transfer.
- *  Includes BDO's jargon: POB IBFT (InstaPay sends) and W/D FR SAV
- *  (savings/ATM withdrawals). */
+ *  Includes BDO's jargon (POB IBFT sends, W/D FR SAV savings/ATM withdrawals)
+ *  and GCash's bank cash-in/out phrasings. */
 const TRANSFER_WORDS =
-  /(transfer|instapay|pesonet|send money|cash[-\s]?in|cash[-\s]?out|ibft|fr\s+sav)/i;
+  /(transfer|instapay|pesonet|send money|cash[-\s]?in|cash[-\s]?out|ibft|fr\s+sav|received\s+gcash\s+from|sent\s+gcash\s+to)/i;
 
 function daysBetween(a: string, b: string): number {
   return Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
@@ -20,7 +20,7 @@ export interface ReconcileResult {
   transferCount: number;
   /** Fee expenses created by reconciliation. */
   feeCount: number;
-  /** Transfer-like rows with no counterpart (stay counted as expenses). */
+  /** Transfer-like rows with no counterpart (stay counted by direction). */
   unmatchedCount: number;
 }
 
@@ -31,9 +31,10 @@ export interface ReconcileResult {
  * description alone never reconciles.
  *
  * Matched legs become `transfer` (excluded from spending totals) and are
- * linked; the fee becomes its own linked expense. A transfer-like row with
- * no counterpart is marked `external_transfer`/`unmatched` and stays
- * counted as an expense until the user says otherwise.
+ * linked; the fee becomes its own linked expense. A transfer-like row
+ * with no counterpart — in either direction — is marked
+ * `external_transfer`/`unmatched` and stays counted (by the sign of its
+ * amount) until the user says otherwise.
  */
 export function reconcile(txns: NormalizedTxn[]): ReconcileResult {
   const incoming = txns.filter((t) => t.direction === "in");
@@ -99,6 +100,19 @@ export function reconcile(txns: NormalizedTxn[]): ReconcileResult {
       });
     }
   }
+
+  // Incoming legs the same way: a transfer-like cash-in with no counterpart
+  // (e.g. "Received GCash from BDO…") shouldn't silently count as income
+  // either — mark it for the user. Genuine receipts (salary, deposits)
+  // don't match the wording and stay income.
+  incoming.forEach((inc, j) => {
+    if (used.has(j) || inc.txn_type === "transfer") return;
+    if (TRANSFER_WORDS.test(inc.description)) {
+      inc.txn_type = "external_transfer";
+      inc.status = "unmatched";
+      unmatchedCount++;
+    }
+  });
 
   txns.push(...fees);
   return { transferCount, feeCount: fees.length, unmatchedCount };

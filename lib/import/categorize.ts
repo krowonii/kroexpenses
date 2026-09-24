@@ -144,8 +144,40 @@ export function llmConfigured(): boolean {
   return Boolean(apiKey());
 }
 
-/** Transactions per LLM call — keeps each prompt small and predictable. */
-const CHUNK_SIZE = 40;
+/** Seconds to wait on a 429 — Google's message includes "Please retry in
+ *  Xs"; 30s when it doesn't. */
+function retrySeconds(message: string): number | null {
+  const match = message.match(/retry in (\d+)\s*s/i);
+  return match ? Number(match[1]) : null;
+}
+
+/** A 429 rate-limit rejection — the SDK may surface it as an ApiError, a
+ *  subclass, or a plain object, so check status and message. */
+function isRateLimitError(error: unknown): boolean {
+  if ((error as { status?: unknown })?.status === 429) return true;
+  return /rate limit/i.test(error instanceof Error ? error.message : String(error));
+}
+
+/** Run a call, waiting out free-tier 429s instead of aborting the whole
+ *  categorization pass. */
+async function withRateLimitRetry<T>(attempt: () => Promise<T>): Promise<T> {
+  for (let tries = 0; ; tries++) {
+    try {
+      return await attempt();
+    } catch (error) {
+      const wait = isRateLimitError(error)
+        ? (retrySeconds(error instanceof Error ? error.message : String(error)) ?? 30)
+        : null;
+      if (wait === null || tries >= 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, wait * 1000 + 2_000));
+    }
+  }
+}
+
+/** Transactions per LLM call. Bigger chunks mean fewer requests, which
+ *  keeps free-tier limits (5 requests/minute) from breaking an import;
+ *  429s that still land are waited out in withRateLimitRetry. */
+const CHUNK_SIZE = Math.max(10, Number(process.env.LLM_CHUNK_SIZE) || 100);
 
 export interface LlmCategorization {
   ok: boolean;
@@ -180,21 +212,23 @@ export async function categorizeWithLlm(
     );
 
     try {
-      const interaction = await client.interactions.create({
-        model: process.env.LLM_MODEL ?? "gemini-3.8-flash",
-        input: `Categories: ${categories.map((c) => c.name).join(", ")}\n\nTransactions:\n${lines.join("\n")}`,
-        system_instruction:
-          "You categorize personal transactions for a Philippine expense tracker. " +
-          "For each transaction, pick the single best category from the provided list. " +
-          "If none fit, pick the closest one and lower the confidence. " +
-          "Respond only with the structured output.",
-        response_format: {
-          type: "text",
-          mime_type: "application/json",
-          schema: RESULT_SCHEMA,
-        },
-        generation_config: { max_output_tokens: 16000 },
-      });
+      const interaction = await withRateLimitRetry(() =>
+        client.interactions.create({
+          model: process.env.LLM_MODEL ?? "gemini-3.8-flash",
+          input: `Categories: ${categories.map((c) => c.name).join(", ")}\n\nTransactions:\n${lines.join("\n")}`,
+          system_instruction:
+            "You categorize personal transactions for a Philippine expense tracker. " +
+            "For each transaction, pick the single best category from the provided list. " +
+            "If none fit, pick the closest one and lower the confidence. " +
+            "Respond only with the structured output.",
+          response_format: {
+            type: "text",
+            mime_type: "application/json",
+            schema: RESULT_SCHEMA,
+          },
+          generation_config: { max_output_tokens: 16000 },
+        })
+      );
 
       if (interaction.status !== "completed") {
         return {

@@ -39,12 +39,16 @@ app/api/import/       # detect (inspect uploads), process (run pipeline), histor
 app/api/accounts/     # active accounts for the import screen
 app/api/summary/      # dashboard aggregates (totals, categories, series)
 app/api/review/       # review queue (GET items) + decisions (POST)
+app/api/transactions/ # manual expense entry (POST) + ledger listing (GET: filters + pagination) + clear data (DELETE)
+app/api/categories/   # category list + add/rename/delete + drag-reorder (POST)
 components/
-  ui.tsx              # shared primitives: Panel, PanelHead, Card, PageShell
-  auth/               # sign-out control
+  ui.tsx              # shared primitives: Panel, PanelHead, Card, PageShell, Skeleton, chips
+  settings/           # settings cog + modal (sign out, clear transaction data)
   dashboard/          # dashboard sections (header, summary, charts, table, …)
   import/             # upload area, file review, processing state, summary, history
   review/             # review board (confirm/correct + unmatched transfers)
+  transactions/       # full ledger: search + filters + pagination
+  expense/            # floating add: sheet, amount numpad (mobile), category editor
 lib/
   types.ts            # domain model: Transaction, Account, Category, statuses
   defaults.ts         # starter accounts + categories (used until the DB is ready)

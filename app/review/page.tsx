@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PageShell, Panel, PanelHead } from "@/components/ui";
+import { PageShell, Panel, PanelHead, chipClass } from "@/components/ui";
 import { signedPeso } from "@/lib/format";
 
 interface ReviewItem {
@@ -10,6 +10,7 @@ interface ReviewItem {
   amount: number;
   txn_type: string;
   status: string;
+  direction: string;
   confidence: number | null;
   merchant: string | null;
   description: string | null;
@@ -25,8 +26,21 @@ interface Category {
 
 const DATE_FMT = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" });
 
-const selectClass =
-  "bg-surface border border-border rounded-sm px-2 py-1 text-[12.5px] cursor-pointer";
+const inputClass =
+  "bg-surface border border-border rounded-sm px-3 py-1.5 text-[12.5px] text-text placeholder:text-text-faint focus:outline-none focus:border-net flex-1 min-w-0";
+
+function TxnTitle({ item }: { item: ReviewItem }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="flex-1 truncate text-[12.5px] font-medium">
+        {item.merchant || item.description || "Unknown"}
+      </span>
+      <span className="font-mono text-[12.5px] text-expense whitespace-nowrap">
+        {signedPeso(item.amount)}
+      </span>
+    </div>
+  );
+}
 
 function TxnMeta({ item }: { item: ReviewItem }) {
   const suggestion = item.category?.name
@@ -43,17 +57,112 @@ function TxnMeta({ item }: { item: ReviewItem }) {
   );
 }
 
+/** Category picker as buttons — one tap to select, with an add affordance
+ *  at the end so a new category can be created alongside the pick. */
+function CategoryChips({
+  item,
+  categories,
+  picks,
+  onPick,
+  onAdd,
+}: {
+  item: ReviewItem;
+  categories: Category[];
+  picks: Record<string, string>;
+  onPick: (itemId: string, categoryId: string) => void;
+  onAdd: (itemId: string) => void;
+}) {
+  const selected = picks[item.id] ?? item.category?.id ?? "";
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {categories.map((category) => (
+        <button
+          key={category.id}
+          type="button"
+          onClick={() => onPick(item.id, category.id)}
+          className={chipClass(selected === category.id)}
+        >
+          {category.name}
+        </button>
+      ))}
+      {categories.length === 0 && (
+        <span className="text-[12px] text-text-faint">No categories yet — add one:</span>
+      )}
+      <button
+        type="button"
+        onClick={() => onAdd(item.id)}
+        className={`${chipClass(false)} border-dashed`}
+      >
+        + Add category
+      </button>
+    </div>
+  );
+}
+
+/** Inline input behind the "+ Add category" chip. */
+function AddCategoryRow({
+  itemId,
+  name,
+  busy,
+  onNameChange,
+  onAdd,
+  onCancel,
+}: {
+  itemId: string;
+  name: string;
+  busy: boolean;
+  onNameChange: (value: string) => void;
+  onAdd: (itemId: string) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5">
+      <input
+        value={name}
+        onChange={(event) => onNameChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") onAdd(itemId);
+          if (event.key === "Escape") onCancel();
+        }}
+        autoFocus
+        placeholder="New category"
+        maxLength={40}
+        className={inputClass}
+      />
+      <button
+        type="button"
+        onClick={() => onAdd(itemId)}
+        disabled={busy || !name.trim()}
+        className="rounded-sm bg-net px-3 py-1.5 text-[12.5px] font-semibold text-bg hover:opacity-90 disabled:opacity-60"
+      >
+        Add
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        aria-label="Cancel"
+        className="text-[15px] leading-none text-text-faint hover:text-text px-1"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 /**
  * The review queue: one card per transaction that needs the user —
  * low-confidence AI suggestions to confirm or correct, and transfer-like
- * rows with no counterpart. Confidently categorized transactions never
- * land here.
+ * rows with no counterpart. Confirms are optimistic (the row leaves
+ * immediately, the save runs behind the scenes) and never lock each
+ * other, so several can fire within a short window.
  */
 export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [picks, setPicks] = useState<Record<string, string>>({});
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [addingFor, setAddingFor] = useState<string | null>(null);
+  const [addName, setAddName] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,35 +188,97 @@ export default function ReviewPage() {
     };
   }, []);
 
-  const pending = items.filter((t) => t.status === "pending_review");
+  // Everything in the queue that isn't an unmatched transfer needs a
+  // category — pending_review, or an expense that lost its category.
+  const pending = items.filter((t) => t.status !== "unmatched");
   const unmatched = items.filter((t) => t.status === "unmatched");
+  const pickFor = (item: ReviewItem) => picks[item.id] ?? item.category?.id ?? "";
+  // What Confirm all can apply: items with a category available.
+  const confirmable = pending.filter((t) => pickFor(t));
 
-  async function act(item: ReviewItem, action: "categorize" | "transfer") {
-    if (busyId) return;
-    setBusyId(item.id);
+  function onPick(itemId: string, categoryId: string) {
+    setPicks((current) => ({ ...current, [itemId]: categoryId }));
+  }
+
+  function confirm(item: ReviewItem, action: "categorize" | "transfer") {
     setError(null);
-    const pick = picks[item.id] ?? item.category?.id ?? "";
+    const pick = pickFor(item);
+    const index = items.findIndex((t) => t.id === item.id);
+    setItems((current) => current.filter((t) => t.id !== item.id));
+    void (async () => {
+      try {
+        const res = await fetch("/api/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: item.id,
+            categoryId: action === "categorize" ? pick || null : null,
+            action,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error ?? "Failed to save");
+        }
+      } catch (err) {
+        // Restore the row where it was and surface the failure.
+        setItems((current) => {
+          if (current.some((t) => t.id === item.id)) return current;
+          const next = [...current];
+          next.splice(index < 0 ? next.length : index, 0, item);
+          return next;
+        });
+        setError(err instanceof Error ? err.message : "Failed to save");
+      }
+    })();
+  }
+
+  /** Confirm every pending item that has a category to apply — items
+   *  without one stay in the queue for a real pick. */
+  function confirmAll() {
+    for (const item of confirmable) confirm(item, "categorize");
+  }
+
+  async function addCategory(forItemId: string) {
+    const name = addName.trim();
+    if (addBusy || !name) return;
+    setAddBusy(true);
+    setError(null);
     try {
-      const res = await fetch("/api/review", {
+      const res = await fetch("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: item.id,
-          categoryId: action === "categorize" ? pick || null : null,
-          action,
-        }),
+        body: JSON.stringify({ name }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? "Failed to save");
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? "Failed to save");
+      const category = body.category as Category | undefined;
+      if (category) {
+        setCategories((current) =>
+          current.some((c) => c.id === category.id) ? current : [...current, category]
+        );
+        // The new category is picked for the transaction being reviewed.
+        setPicks((current) => ({ ...current, [forItemId]: category.id }));
       }
-      setItems((current) => current.filter((t) => t.id !== item.id));
+      setAddName("");
+      setAddingFor(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
-      setBusyId(null);
+      setAddBusy(false);
     }
   }
+
+  const addRowProps = {
+    name: addName,
+    busy: addBusy,
+    onNameChange: setAddName,
+    onAdd: addCategory,
+    onCancel: () => {
+      setAddingFor(null);
+      setAddName("");
+    },
+  };
 
   return (
     <PageShell title="Review">
@@ -129,53 +300,53 @@ export default function ReviewPage() {
         <div className="flex flex-col gap-3">
           {pending.length > 0 && (
             <Panel>
-              <PanelHead title="Needs review" hint={`${pending.length} low-confidence`} />
+              <PanelHead
+                title="Needs review"
+                hint={`${pending.length} low-confidence`}
+                action={
+                  <button
+                    type="button"
+                    onClick={confirmAll}
+                    disabled={confirmable.length === 0}
+                    className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint disabled:opacity-60"
+                  >
+                    Confirm all{confirmable.length > 0 ? ` (${confirmable.length})` : ""}
+                  </button>
+                }
+              />
               <div className="flex flex-col gap-2.5">
                 {pending.map((item) => (
                   <div
                     key={item.id}
                     className="bg-surface-2 border border-border-soft rounded-md px-3.5 py-3"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex-1 truncate text-[12.5px] font-medium">
-                        {item.merchant || item.description || "Unknown"}
-                      </span>
-                      <span className="font-mono text-[12.5px] text-expense whitespace-nowrap">
-                        {signedPeso(item.amount)}
-                      </span>
-                    </div>
+                    <TxnTitle item={item} />
                     <TxnMeta item={item} />
                     {item.description && item.merchant && item.description !== item.merchant && (
                       <div className="mt-1 text-[12px] text-text-faint truncate">
                         {item.description}
                       </div>
                     )}
-                    <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                      <label htmlFor={`cat-${item.id}`} className="text-[11.5px] text-text-dim">
-                        Category
-                      </label>
-                      <select
-                        id={`cat-${item.id}`}
-                        value={picks[item.id] ?? item.category?.id ?? ""}
-                        onChange={(event) =>
-                          setPicks((current) => ({ ...current, [item.id]: event.target.value }))
-                        }
-                        className={selectClass}
-                      >
-                        <option value="">Uncategorized…</option>
-                        {categories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="mt-2.5">
+                      <CategoryChips
+                        item={item}
+                        categories={categories}
+                        picks={picks}
+                        onPick={onPick}
+                        onAdd={setAddingFor}
+                      />
+                      {addingFor === item.id && (
+                        <AddCategoryRow itemId={item.id} {...addRowProps} />
+                      )}
+                    </div>
+                    <div className="mt-2.5">
                       <button
                         type="button"
-                        disabled={busyId === item.id}
-                        onClick={() => act(item, "categorize")}
+                        disabled={!pickFor(item)}
+                        onClick={() => confirm(item, "categorize")}
                         className="rounded-sm bg-net px-3 py-1.5 text-[12.5px] font-semibold text-bg hover:opacity-90 disabled:opacity-60"
                       >
-                        {busyId === item.id ? "Saving…" : "Confirm"}
+                        Confirm
                       </button>
                     </div>
                   </div>
@@ -186,7 +357,10 @@ export default function ReviewPage() {
 
           {unmatched.length > 0 && (
             <Panel>
-              <PanelHead title="Unmatched transfers" hint="count as expenses until identified" />
+              <PanelHead
+                title="Unmatched transfers"
+                hint="count toward your totals until identified"
+              />
               <p className="text-[12.5px] text-text-dim mb-3">
                 These look like transfers with no matching counterpart on file.
                 Import the other account's statement and reconciliation
@@ -199,47 +373,32 @@ export default function ReviewPage() {
                     key={item.id}
                     className="bg-surface-2 border border-border-soft rounded-md px-3.5 py-3"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex-1 truncate text-[12.5px] font-medium">
-                        {item.merchant || item.description || "Unknown"}
-                      </span>
-                      <span className="font-mono text-[12.5px] text-expense whitespace-nowrap">
-                        {signedPeso(item.amount)}
-                      </span>
-                    </div>
+                    <TxnTitle item={item} />
                     <TxnMeta item={item} />
-                    <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                      <label htmlFor={`ucat-${item.id}`} className="text-[11.5px] text-text-dim">
-                        Category
-                      </label>
-                      <select
-                        id={`ucat-${item.id}`}
-                        value={picks[item.id] ?? ""}
-                        onChange={(event) =>
-                          setPicks((current) => ({ ...current, [item.id]: event.target.value }))
-                        }
-                        className={selectClass}
-                      >
-                        <option value="">Uncategorized…</option>
-                        {categories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="mt-2.5">
+                      <CategoryChips
+                        item={item}
+                        categories={categories}
+                        picks={picks}
+                        onPick={onPick}
+                        onAdd={setAddingFor}
+                      />
+                      {addingFor === item.id && (
+                        <AddCategoryRow itemId={item.id} {...addRowProps} />
+                      )}
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-2">
                       <button
                         type="button"
-                        disabled={busyId === item.id}
-                        onClick={() => act(item, "categorize")}
-                        className="rounded-sm bg-net px-3 py-1.5 text-[12.5px] font-semibold text-bg hover:opacity-90 disabled:opacity-60"
+                        onClick={() => confirm(item, "categorize")}
+                        className="rounded-sm bg-net px-3 py-1.5 text-[12.5px] font-semibold text-bg hover:opacity-90"
                       >
-                        {busyId === item.id ? "Saving…" : "Keep as expense"}
+                        {item.direction === "in" ? "Keep as income" : "Keep as expense"}
                       </button>
                       <button
                         type="button"
-                        disabled={busyId === item.id}
-                        onClick={() => act(item, "transfer")}
-                        className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint disabled:opacity-60"
+                        onClick={() => confirm(item, "transfer")}
+                        className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint"
                       >
                         Mark as transfer
                       </button>
