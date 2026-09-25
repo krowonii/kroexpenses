@@ -182,6 +182,7 @@ async function saveBatch(
       user_id: userId,
       account_id: t.account_id,
       txn_date: t.txn_date,
+      txn_time: t.txn_time,
       amount: t.amount,
       direction: t.direction,
       merchant: t.merchant,

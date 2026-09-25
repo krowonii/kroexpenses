@@ -34,14 +34,17 @@ export async function GET() {
       supabase
         .from("transactions")
         .select(
-          "id,txn_date,amount,txn_type,status,direction,confidence,merchant,description,category:categories(id,name),account:accounts(name)"
+          "id,txn_date,txn_time,amount,txn_type,status,direction,confidence,merchant,description,category:categories(id,name),account:accounts(name)"
         )
         // pending_review + unmatched, plus any expense that ended up with
         // no category at all (an interrupted AI pass, or a later category
         // delete nulling category_id) — those need the user too, and a
         // re-import can't fix them (dedupe skips already-imported rows).
-        .or("status.in.(pending_review,unmatched),and(txn_type.eq.expense,category_id.is.null)")
-        .order("txn_date", { ascending: false }),
+        // Excluded rows leave all totals and are configured on the ledger,
+        // so they never queue back in.
+        .or("status.in.(pending_review,unmatched),and(txn_type.eq.expense,category_id.is.null,status.ne.excluded)")
+        .order("txn_date", { ascending: false })
+        .order("txn_time", { ascending: false, nullsFirst: false }),
       supabase.from("categories").select("id,name,color").order("sort_order"),
     ]);
     if (txnsRes.error || catsRes.error) throw txnsRes.error ?? catsRes.error;
@@ -59,14 +62,16 @@ export async function GET() {
  * Apply a review decision. `categorize` stands the user's pick up as the
  * transaction's category and learns it (pattern from the merchant) so
  * future imports need less review; `transfer` marks an unmatched row as a
- * reconciled internal transfer, which excludes it from spending totals.
+ * reconciled internal transfer; `exclude` removes the row from all totals
+ * until restored (restoring happens on the ledger's edit dialog). Updates
+ * are scoped by user_id as well as id.
  */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       id?: string;
       categoryId?: string | null;
-      action?: "categorize" | "transfer";
+      action?: "categorize" | "transfer" | "exclude";
     };
     if (!body.id) {
       return Response.json({ error: "Missing transaction id" }, { status: 400 });
@@ -81,7 +86,18 @@ export async function POST(request: Request) {
       const { error } = await supabase
         .from("transactions")
         .update({ txn_type: "transfer", status: "categorized", confidence: null })
-        .eq("id", body.id);
+        .eq("id", body.id)
+        .eq("user_id", userId);
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+
+    if (body.action === "exclude") {
+      const { error } = await supabase
+        .from("transactions")
+        .update({ status: "excluded" })
+        .eq("id", body.id)
+        .eq("user_id", userId);
       if (error) throw error;
       return Response.json({ ok: true });
     }
@@ -90,6 +106,7 @@ export async function POST(request: Request) {
       .from("transactions")
       .update({ category_id: body.categoryId ?? null, status: "categorized", confidence: 1 })
       .eq("id", body.id)
+      .eq("user_id", userId)
       .select("merchant")
       .single();
     if (error) throw error;

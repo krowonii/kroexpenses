@@ -5,6 +5,7 @@ import {
   findHeaderIndex,
   parseAmount,
   toIsoDate,
+  toTimeOfDay,
 } from "./columns";
 
 export interface NormalizeOptions {
@@ -183,6 +184,9 @@ export function normalizeFile(
       account_id: opts.accountId,
       account_name: opts.accountName,
       txn_date: date,
+      // The statement's own time-of-day ("03:20 AM"), so same-day rows
+      // sort chronologically instead of by insertion order.
+      txn_time: toTimeOfDay(dateCol >= 0 ? (row[dateCol] ?? "") : ""),
       amount,
       direction,
       merchant: opts.source === "gcash" ? gcashMerchant(description) : merchantFrom(description),

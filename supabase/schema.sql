@@ -8,7 +8,9 @@
 
 create type account_type as enum ('bank', 'ewallet', 'cash', 'credit_card', 'other');
 create type txn_type as enum ('expense', 'income', 'transfer', 'external_transfer');
-create type txn_status as enum ('categorized', 'pending_review', 'unmatched');
+-- 'excluded' = user-marked to leave all totals until restored
+-- (add to existing databases with: alter type txn_status add value if not exists 'excluded' after 'unmatched';)
+create type txn_status as enum ('categorized', 'pending_review', 'unmatched', 'excluded');
 create type txn_direction as enum ('in', 'out');
 
 -- Accounts: provenance only, no balance tracking.
@@ -43,6 +45,9 @@ create table public.transactions (
   user_id uuid not null references auth.users(id) on delete cascade,
   account_id uuid not null references public.accounts(id) on delete restrict,
   txn_date date not null,
+  -- Time-of-day "HH:MM" 24h from the statement ("2026-07-26 03:20 AM"),
+  -- so same-day rows sort chronologically; null sorts after timed rows.
+  txn_time text,
   amount numeric(14,2) not null,
   direction txn_direction not null,
   merchant text,
@@ -141,6 +146,9 @@ create policy "users manage own imports"
 
 alter table public.transactions
   add column if not exists import_id uuid references public.imports(id) on delete set null;
+
+alter table public.transactions
+  add column if not exists txn_time text;
 
 -- Auto-seed starter accounts + categories the moment a user is created
 -- (trigger on auth.users), so the first sign-in already has the accounts

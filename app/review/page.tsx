@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { PageShell, Panel, PanelHead, chipClass } from "@/components/ui";
-import { signedPeso } from "@/lib/format";
+import { signedPeso, timeLabel } from "@/lib/format";
 
 interface ReviewItem {
   id: string;
   txn_date: string;
+  txn_time: string | null;
   amount: number;
   txn_type: string;
   status: string;
@@ -50,7 +51,8 @@ function TxnMeta({ item }: { item: ReviewItem }) {
     : "";
   return (
     <div className="mt-1 font-mono text-[11.5px] text-text-dim">
-      {DATE_FMT.format(new Date(`${item.txn_date}T00:00:00`))} ·{" "}
+      {DATE_FMT.format(new Date(`${item.txn_date}T00:00:00`))}
+      {timeLabel(item.txn_time) ? ` · ${timeLabel(item.txn_time)}` : ""} ·{" "}
       {item.account?.name ?? "—"}
       {suggestion}
     </div>
@@ -200,7 +202,7 @@ export default function ReviewPage() {
     setPicks((current) => ({ ...current, [itemId]: categoryId }));
   }
 
-  function confirm(item: ReviewItem, action: "categorize" | "transfer") {
+  function confirm(item: ReviewItem, action: "categorize" | "transfer" | "exclude") {
     setError(null);
     const pick = pickFor(item);
     const index = items.findIndex((t) => t.id === item.id);
@@ -339,7 +341,7 @@ export default function ReviewPage() {
                         <AddCategoryRow itemId={item.id} {...addRowProps} />
                       )}
                     </div>
-                    <div className="mt-2.5">
+                    <div className="mt-2.5 flex items-center gap-2 flex-wrap">
                       <button
                         type="button"
                         disabled={!pickFor(item)}
@@ -347,6 +349,20 @@ export default function ReviewPage() {
                         className="rounded-sm bg-net px-3 py-1.5 text-[12.5px] font-semibold text-bg hover:opacity-90 disabled:opacity-60"
                       >
                         Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => confirm(item, "transfer")}
+                        className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint"
+                      >
+                        Mark as transfer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => confirm(item, "exclude")}
+                        className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-faint hover:text-expense hover:border-text-faint"
+                      >
+                        Exclude
                       </button>
                     </div>
                   </div>
@@ -387,7 +403,7 @@ export default function ReviewPage() {
                         <AddCategoryRow itemId={item.id} {...addRowProps} />
                       )}
                     </div>
-                    <div className="mt-2.5 flex items-center gap-2">
+                    <div className="mt-2.5 flex items-center gap-2 flex-wrap">
                       <button
                         type="button"
                         onClick={() => confirm(item, "categorize")}
@@ -401,6 +417,13 @@ export default function ReviewPage() {
                         className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint"
                       >
                         Mark as transfer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => confirm(item, "exclude")}
+                        className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-faint hover:text-expense hover:border-text-faint"
+                      >
+                        Exclude
                       </button>
                     </div>
                   </div>

@@ -13,9 +13,10 @@ export type TxnType =
 /**
  * Lifecycle status. `unmatched` = transfer with no counterpart found
  * (counted as an expense until identified otherwise); `pending_review`
- * = low AI confidence, needs the user.
+ * = low AI confidence, needs the user; `excluded` = user-marked to leave
+ * all totals until restored.
  */
-export type TxnStatus = "categorized" | "pending_review" | "unmatched";
+export type TxnStatus = "categorized" | "pending_review" | "unmatched" | "excluded";
 
 export interface Account {
   id: string;

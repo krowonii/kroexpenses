@@ -4,7 +4,10 @@ import { Panel } from "@/components/ui";
 import { signedPeso } from "@/lib/format";
 
 export interface TxnRow {
+  id?: string;
   date: string;
+  /** "3:20 PM" when the statement stamped a time; ""/undefined otherwise. */
+  time?: string | null;
   merchant: string;
   category: string;
   amount: number;
@@ -23,6 +26,7 @@ export function TransactionsTable({
   showHeader = true,
   emptyHint = "No transactions yet — import a statement to get started.",
   footer,
+  actions,
 }: {
   txns: TxnRow[];
   /** False hides the "Recent transactions" + "View all →" head (the full
@@ -31,6 +35,9 @@ export function TransactionsTable({
   emptyHint?: string;
   /** Rendered inside the panel below the table — pagination on the ledger. */
   footer?: ReactNode;
+  /** Optional trailing column of per-row controls (edit/delete on the
+   *  ledger). Omitted — the dashboard's recent list — hides the column. */
+  actions?: (txn: TxnRow) => ReactNode;
 }) {
   return (
     <Panel>
@@ -59,13 +66,14 @@ export function TransactionsTable({
                 <th className={th}>Category</th>
                 <th className={`${th} text-right`}>Amount</th>
                 <th className={th}>Account</th>
+                {actions && <th className={th} aria-label="Row actions" />}
               </tr>
             </thead>
             <tbody>
               {txns.map((t, i) => (
-                <tr key={i}>
+                <tr key={t.id ?? i}>
                   <td className={`${td(i === txns.length - 1)} font-mono text-text-faint text-xs`}>
-                    {t.date}
+                    {t.time ? `${t.date} · ${t.time}` : t.date}
                   </td>
                   <td
                     className={`${td(i === txns.length - 1)} max-w-[220px] overflow-hidden text-ellipsis`}
@@ -85,6 +93,7 @@ export function TransactionsTable({
                     </span>
                   </td>
                   <td className={`${td(i === txns.length - 1)} text-text-faint text-xs`}>{t.account}</td>
+                  {actions && <td className={td(i === txns.length - 1)}>{actions(t)}</td>}
                 </tr>
               ))}
             </tbody>

@@ -29,6 +29,8 @@ export interface DashboardData {
   budgets: { name: string; spent: number; limit: number }[];
   txns: {
     date: string;
+    /** "3:20 PM" when the statement stamped a time; "" otherwise. */
+    time?: string;
     merchant: string;
     category: string;
     amount: number;

@@ -31,6 +31,8 @@ export interface NormalizedTxn {
   account_id: string | null;
   /** ISO date (YYYY-MM-DD) */
   txn_date: string;
+  /** Time-of-day "HH:MM" 24h when the statement stamps one; null sorts last. */
+  txn_time: string | null;
   /** Signed: negative = outflow, positive = inflow */
   amount: number;
   /** Matches the sign of `amount` */

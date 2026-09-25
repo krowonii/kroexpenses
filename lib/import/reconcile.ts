@@ -85,6 +85,7 @@ export function reconcile(txns: NormalizedTxn[]): ReconcileResult {
         account_id: out.account_id,
         account_name: out.account_name,
         txn_date: out.txn_date,
+        txn_time: out.txn_time,
         amount: -Math.round(fee * 100) / 100,
         direction: "out",
         merchant: "Transfer fee",

@@ -86,6 +86,26 @@ export function toIsoDate(raw: string): string | null {
   return null;
 }
 
+/**
+ * Extract the time-of-day from a statement date string, normalized to
+ * "HH:MM" 24h — lexicographic order is chronological. Handles the same
+ * trailing shapes toIsoDate strips: "03:20 AM" (GCash stamps every date),
+ * "14:05", "14:05:30", ISO "T14:05:00". Null when the date carries no time
+ * (e.g. BDO's date-only rows) — those sort after timed rows within a day.
+ */
+export function toTimeOfDay(raw: string): string | null {
+  const m = /[T\s](\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?\s*(am|pm)?\s*$/i.exec(
+    raw.trim()
+  );
+  if (!m) return null;
+  let hours = +m[1];
+  const half = m[3]?.toLowerCase();
+  if (half === "pm" && hours < 12) hours += 12;
+  if (half === "am" && hours === 12) hours = 0;
+  if (hours > 23) return null;
+  return `${String(hours).padStart(2, "0")}:${m[2]}`;
+}
+
 /** Deterministic duplicate key: account + date + amount + normalized description. */
 export function dedupeKey(
   accountName: string,

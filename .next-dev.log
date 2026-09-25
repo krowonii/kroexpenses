@@ -188,3 +188,5 @@
  GET /api/summary?period=thisMonth 200 in 1116ms (next.js: 4ms, proxy.ts: 239ms, application-code: 873ms)
  GET /api/summary?period=lastMonth 200 in 665ms (next.js: 4ms, proxy.ts: 225ms, application-code: 436ms)
  GET /api/summary?period=thisMonth 200 in 704ms (next.js: 4ms, proxy.ts: 235ms, application-code: 465ms)
+ GET /api/accounts 200 in 1444ms (next.js: 6ms, proxy.ts: 1058ms, application-code: 380ms)
+ GET /api/transactions?per_page=1 200 in 1666ms (next.js: 14ms, proxy.ts: 1061ms, application-code: 591ms)

@@ -8,11 +8,13 @@ import {
   type DashboardData,
   type PeriodKey,
 } from "@/lib/dashboard";
+import { timeLabel } from "@/lib/format";
 
 export const runtime = "nodejs";
 
 interface Row {
   txn_date: string;
+  txn_time: string | null;
   amount: number;
   txn_type: string;
   status: string;
@@ -29,8 +31,12 @@ function parsePeriod(request: Request): PeriodKey {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Aggregate rows into the dashboard numbers. Reconciled transfers are
- *  excluded from spending totals; unmatched ones stay counted (masterdoc). */
+/**
+ * Aggregate rows into the dashboard numbers. Reconciled transfers are
+ * excluded from spending totals; so are user-excluded rows (status
+ * excluded — they leave every number until restored); unmatched ones
+ * stay counted (masterdoc).
+ */
 function aggregate(rows: Row[]) {
   let income = 0;
   let expense = 0;
@@ -40,6 +46,7 @@ function aggregate(rows: Row[]) {
 
   for (const row of rows) {
     if (row.txn_type === "transfer") continue;
+    if (row.status === "excluded") continue;
     if (row.amount > 0) {
       income += row.amount;
       byDayIn.set(row.txn_date, (byDayIn.get(row.txn_date) ?? 0) + row.amount);
@@ -73,7 +80,7 @@ export async function GET(request: Request) {
       supabase
         .from("transactions")
         .select(
-          "txn_date,amount,txn_type,status,merchant,description,category:categories(name,color),account:accounts(name)"
+          "txn_date,txn_time,amount,txn_type,status,merchant,description,category:categories(name,color),account:accounts(name)"
         )
         .gte("txn_date", range.from)
         .lte("txn_date", range.to)
@@ -98,8 +105,8 @@ export async function GET(request: Request) {
         .lte("txn_date", range.prev.to);
       if (prevError) throw prevError;
       prevTotals = { income: 0, expense: 0 };
-      for (const row of (prevData ?? []) as { amount: number; txn_type: string }[]) {
-        if (row.txn_type === "transfer") continue;
+      for (const row of (prevData ?? []) as { amount: number; txn_type: string; status: string }[]) {
+        if (row.txn_type === "transfer" || row.status === "excluded") continue;
         if (row.amount > 0) prevTotals.income += row.amount;
         else prevTotals.expense += -row.amount;
       }
@@ -178,6 +185,7 @@ export async function GET(request: Request) {
     const statusLabel: Record<string, string> = {
       pending_review: "Needs review",
       unmatched: "Unmatched",
+      excluded: "Excluded",
     };
 
     const data: DashboardData = {
@@ -198,11 +206,13 @@ export async function GET(request: Request) {
       budgets,
       txns: rows.slice(0, 8).map((row) => ({
         date: DAY_SHORT.format(new Date(`${row.txn_date}T00:00:00Z`)),
+        time: timeLabel(row.txn_time),
         merchant: row.merchant || row.description || "—",
         category: row.category?.name ?? statusLabel[row.status] ?? "Uncategorized",
         amount: row.amount,
         account: row.account?.name ?? "—",
       })),
+
     };
 
     return Response.json({ dbReady: true, data });
