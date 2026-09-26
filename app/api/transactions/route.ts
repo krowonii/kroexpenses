@@ -3,7 +3,10 @@ export const runtime = "nodejs";
 /**
  * The full ledger — newest first (same-day rows by the statement's own
  * time-of-day, then newest created), with pagination (up to 100 per page)
- * and filters: account, category, type, and a merchant/description search.
+ * and filters: account, category (comma-separated ids), type, an optional
+ * from/to date range, and a merchant/description search. The export
+ * dialog reuses these filters for its count preview — the same query
+ * semantics, minus pagination.
  */
 export async function GET(request: Request) {
   try {
@@ -13,6 +16,8 @@ export async function GET(request: Request) {
     const type = params.get("type") ?? "";
     const account = params.get("account") ?? "";
     const category = params.get("category") ?? "";
+    const from = params.get("from") ?? "";
+    const to = params.get("to") ?? "";
     // Commas/parens break PostgREST's `.or()` — strip them from the search.
     const q = (params.get("q") ?? "").replace(/[,()]/g, "").trim();
 
@@ -28,7 +33,12 @@ export async function GET(request: Request) {
       .order("txn_time", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
     if (account) query = query.eq("account_id", account);
-    if (category) query = query.eq("category_id", category);
+    if (category) {
+      const ids = category.split(",").map((id) => id.trim()).filter(Boolean);
+      if (ids.length > 0) query = query.in("category_id", ids);
+    }
+    if (from) query = query.gte("txn_date", from);
+    if (to) query = query.lte("txn_date", to);
     if (type === "expense" || type === "income") {
       query = query.eq("txn_type", type);
     } else if (type === "transfer") {
@@ -150,13 +160,15 @@ export async function POST(request: Request) {
 
 /**
  * Edit an existing transaction: `?id=<uuid>` with any of date, amount
- * (positive; the sign follows the row's existing direction), categoryId,
- * accountId, or `restore: true` (an excluded row returns to the totals —
- * categorized when it has a category, pending_review when not). Only the
- * fields sent change — otherwise status is untouched, so a pending-review
- * row still resolves in the review queue. The account and category are
- * verified the same way as POST; the row itself is read first, which
- * doubles as the existence check.
+ * (positive; the sign follows the row's effective direction), categoryId,
+ * accountId, `txnType` (expense|income — direction follows the type and
+ * the stored amount's sign flips to match), or `restore: true` (an
+ * excluded row returns to the totals — categorized when it has a
+ * category, pending_review when not). Only the fields sent change —
+ * otherwise status is untouched, so a pending-review row still resolves
+ * in the review queue. The account and category are verified the same
+ * way as POST; the row itself is read first, which doubles as the
+ * existence check.
  */
 export async function PATCH(request: Request) {
   try {
@@ -167,6 +179,7 @@ export async function PATCH(request: Request) {
       categoryId?: string | null;
       accountId?: string;
       restore?: boolean;
+      txnType?: string;
     };
     if (!id) {
       return Response.json({ error: "Missing transaction id" }, { status: 400 });
@@ -187,6 +200,9 @@ export async function PATCH(request: Request) {
     if (body.amount !== undefined && amount === undefined) {
       return Response.json({ error: "Amount must be a positive number" }, { status: 400 });
     }
+    if (body.txnType !== undefined && body.txnType !== "expense" && body.txnType !== "income") {
+      return Response.json({ error: "Type must be expense or income" }, { status: 400 });
+    }
 
     const { createClient, getUserId } = await import("@/lib/supabase/server");
     const supabase = await createClient();
@@ -196,7 +212,7 @@ export async function PATCH(request: Request) {
     // read doubles as the existence check.
     const { data: existing, error: readError } = await supabase
       .from("transactions")
-      .select("direction,category_id")
+      .select("direction,category_id,amount,txn_type")
       .eq("id", id)
       .limit(1);
     if (readError) throw readError;
@@ -232,9 +248,20 @@ export async function PATCH(request: Request) {
 
     const updates: Record<string, unknown> = {};
     if (date !== undefined) updates.txn_date = date;
+    // Type change: direction follows the type (normalize couples them —
+    // "in" ↔ income), so income totals count it and the ledger colors it.
+    if (body.txnType !== undefined && body.txnType !== existing[0].txn_type) {
+      updates.txn_type = body.txnType;
+      updates.direction = body.txnType === "income" ? "in" : "out";
+    }
+    const effectiveDirection = (updates.direction as "in" | "out" | undefined) ?? direction;
     if (amount !== undefined) {
-      // Signed per the row's direction — satisfies direction_matches_amount.
-      updates.amount = direction === "out" ? -amount : amount;
+      // Signed per the effective direction — satisfies direction_matches_amount.
+      updates.amount = effectiveDirection === "out" ? -amount : amount;
+    } else if (updates.direction) {
+      // Type flipped without an amount change — flip the sign to match.
+      const current = existing[0].amount as number;
+      updates.amount = effectiveDirection === "out" ? -Math.abs(current) : Math.abs(current);
     }
     if (body.categoryId !== undefined) updates.category_id = categoryId;
     if (body.accountId) updates.account_id = body.accountId;

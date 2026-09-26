@@ -17,6 +17,7 @@ interface TxnApiRow {
   txn_date: string;
   txn_time: string | null;
   amount: number;
+  txn_type: string;
   status: string;
   merchant: string | null;
   description: string | null;
@@ -81,6 +82,8 @@ export function Browser() {
   const [error, setError] = useState<string | null>(null);
   // The row being edited — its dialog state lives alongside.
   const [editing, setEditing] = useState<TxnApiRow | null>(null);
+  // The row pending a delete confirm — the styled dialog, not window.confirm.
+  const [deleting, setDeleting] = useState<TxnApiRow | null>(null);
 
   // Debounce the search box so typing doesn't fire a request per key.
   useEffect(() => {
@@ -152,7 +155,13 @@ export function Browser() {
    *  runs behind the scenes, and a failure restores the old fields. */
   function saveEdit(
     target: TxnApiRow,
-    fields: { date: string; amount: number; categoryId: string | null; accountId: string }
+    fields: {
+      date: string;
+      amount: number;
+      categoryId: string | null;
+      accountId: string;
+      txnType: string;
+    }
   ) {
     setError(null);
     const previous = target;
@@ -162,8 +171,18 @@ export function Browser() {
           ? {
               ...r,
               txn_date: fields.date,
-              // The UI edits the magnitude; the stored sign follows the row.
-              amount: (r.amount < 0 ? -1 : 1) * fields.amount,
+              // The UI edits the magnitude; the stored sign follows the
+              // type (or the row's existing sign when the type didn't
+              // change) — income renders green in the table.
+              txn_type: fields.txnType || r.txn_type,
+              amount:
+                (fields.txnType === "income"
+                  ? 1
+                  : fields.txnType === "expense"
+                    ? -1
+                    : r.amount < 0
+                      ? -1
+                      : 1) * fields.amount,
               category: fields.categoryId
                 ? {
                     id: fields.categoryId,
@@ -181,10 +200,12 @@ export function Browser() {
     setEditing(null);
     void (async () => {
       try {
+        // An empty txnType means unchanged — don't send it.
+        const { txnType, ...rest } = fields;
         const res = await fetch(`/api/transactions?id=${encodeURIComponent(target.id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fields),
+          body: JSON.stringify(txnType ? { ...rest, txnType } : rest),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => null);
@@ -199,10 +220,9 @@ export function Browser() {
   }
 
   /** Delete optimistically: the row leaves the table immediately and is
-   *  restored at its old position when the delete fails. */
+   *  restored at its old position when the delete fails. The confirm is
+   *  the styled dialog (DeleteDialog) — not the browser's native one. */
   function deleteRow(target: TxnApiRow) {
-    const name = target.merchant || target.description || "this transaction";
-    if (!window.confirm(`Delete "${name}"? This can't be undone.`)) return;
     setError(null);
     const previous = target;
     const index = raws.findIndex((r) => r.id === target.id);
@@ -345,7 +365,7 @@ export function Browser() {
               </button>
               <button
                 type="button"
-                onClick={() => deleteRow(raw)}
+                onClick={() => setDeleting(raw)}
                 aria-label={`Delete ${display.merchant}`}
                 className="text-[15px] leading-none text-text-faint hover:text-expense px-1 py-1"
               >
@@ -419,6 +439,13 @@ export function Browser() {
           }
         />
       )}
+      {deleting && (
+        <DeleteDialog
+          row={deleting}
+          onClose={() => setDeleting(null)}
+          onDelete={deleteRow}
+        />
+      )}
       </div>
     </PageShell>
   );
@@ -453,6 +480,7 @@ function EditDialog({
     amount: number;
     categoryId: string | null;
     accountId: string;
+    txnType: string;
   }) => void;
   onRestore: (row: TxnApiRow) => void;
   onCategoryCreated: (category: Option) => void;
@@ -461,6 +489,11 @@ function EditDialog({
   const [amount, setAmount] = useState(Math.abs(row.amount).toFixed(2));
   const [categoryId, setCategoryId] = useState(row.category?.id ?? "");
   const [accountId, setAccountId] = useState(row.account?.id ?? "");
+  // Empty = unchanged (a transfer row starts with neither chip picked —
+  // the user moves it to expense/income by tapping, or leaves it).
+  const [txnType, setTxnType] = useState(
+    row.txn_type === "expense" || row.txn_type === "income" ? row.txn_type : ""
+  );
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [addBusy, setAddBusy] = useState(false);
@@ -514,7 +547,13 @@ function EditDialog({
       return;
     }
     setError(null);
-    onSave(row, { date, amount: value, categoryId: categoryId || null, accountId });
+    onSave(row, {
+      date,
+      amount: value,
+      categoryId: categoryId || null,
+      accountId,
+      txnType,
+    });
   }
 
   return (
@@ -576,6 +615,32 @@ function EditDialog({
                 className="w-full bg-surface-2 border border-border-soft rounded-sm px-3 py-2 text-[13px] font-mono text-text focus:outline-none focus:border-net"
               />
             </div>
+          </div>
+
+          <div>
+            <div className="text-[11.5px] text-text-dim mb-1.5">Type</div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setTxnType("expense")}
+                className={chipClass(txnType === "expense")}
+              >
+                Expense
+              </button>
+              <button
+                type="button"
+                onClick={() => setTxnType("income")}
+                className={chipClass(txnType === "income")}
+              >
+                Income
+              </button>
+            </div>
+            {txnType === "" && (
+              <p className="text-[11.5px] text-text-faint mt-1.5">
+                This row is a transfer — leave the type, or move it to
+                expense/income.
+              </p>
+            )}
           </div>
 
           <div>
@@ -666,6 +731,91 @@ function EditDialog({
             Save changes
           </button>
           {error && <p className="text-[12px] text-expense">{error}</p>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Delete confirmation — the same dialog language as the edit sheet
+ * (centered on PC, bottom sheet on mobile) with the row named and a
+ * destructive confirm in the danger-zone red the settings cog uses.
+ * Replaces the browser's native confirm(). The delete itself is
+ * optimistic: confirming closes the dialog while the row leaves the
+ * table, and a failed delete restores it.
+ */
+function DeleteDialog({
+  row,
+  onClose,
+  onDelete,
+}: {
+  row: TxnApiRow;
+  onClose: () => void;
+  onDelete: (row: TxnApiRow) => void;
+}) {
+  // Esc closes.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const name = row.merchant || row.description || "this transaction";
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-bg/75" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Delete transaction"
+        className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-md p-[18px] max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-x-0 max-sm:translate-y-0 max-sm:w-auto max-sm:max-w-none max-sm:rounded-t-md max-sm:rounded-b-none max-sm:p-4"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-[13.5px] font-semibold">Delete transaction</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="text-[15px] leading-none text-text-faint hover:text-text px-1"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="font-mono text-[12.5px] text-text truncate">{name}</div>
+        <div className="font-mono text-[11.5px] text-text-faint mt-0.5">
+          {DAY_SHORT.format(new Date(`${row.txn_date}T00:00:00Z`))}
+          {" · ₱"}
+          {Math.abs(row.amount).toLocaleString("en-PH", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+        </div>
+
+        <div className="text-[12.5px] text-text-dim mt-3">This can't be undone.</div>
+
+        <div className="flex items-center justify-end gap-2.5 mt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onDelete(row);
+              onClose();
+            }}
+            className="rounded-sm bg-expense px-3 py-2 text-[12.5px] font-semibold text-bg hover:opacity-90"
+          >
+            Delete
+          </button>
         </div>
       </div>
     </>

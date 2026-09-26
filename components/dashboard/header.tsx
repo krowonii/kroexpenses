@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SettingsCog } from "@/components/settings/settings-cog";
+import { ExportDialog } from "@/components/dashboard/export-dialog";
 import { todayIso } from "@/lib/dashboard";
 
 const PERIODS = [
@@ -78,6 +79,7 @@ export function DashboardHeader({
         >
           Import
         </Link>
+        <ExportDialog period={period} customRange={customRange} />
         <div
           className="relative inline-flex bg-surface border border-border rounded-md p-0.75 gap-0.5"
           role="tablist"
