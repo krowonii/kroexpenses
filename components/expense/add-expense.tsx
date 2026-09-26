@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import type { Account } from "@/lib/types";
+import { useAppData, storeCategories } from "@/lib/app-data";
 import { todayIso } from "@/lib/dashboard";
 import { chipClass } from "@/components/ui";
 import { evaluateAmount, NumberPad } from "./number-pad";
@@ -60,10 +60,11 @@ export function FloatingAdd() {
 
 function AddExpenseModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  // Categories + accounts come from the shared store — preloaded at app
+  // boot, so the sheet renders them immediately instead of fetching.
+  const { categories, accounts, ready, failed } = useAppData();
   const [date, setDate] = useState(todayIso());
   const [expr, setExpr] = useState("");
-  const [categories, setCategories] = useState<CategoryRow[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -71,39 +72,19 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
   const [newName, setNewName] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Account defaults to Cash — the account named Cash when it exists,
+  // else the first one. Waits for the store's accounts; never overrides
+  // a pick the user already made.
   useEffect(() => {
-    let alive = true;
-    Promise.all([
-      fetch("/api/categories").then((res) => (res.ok ? res.json() : null)),
-      fetch("/api/accounts").then((res) => (res.ok ? res.json() : null)),
-    ])
-      .then(([catsJson, acctsJson]) => {
-        if (!alive) return;
-        const categories = (catsJson?.categories ?? []) as CategoryRow[];
-        const accounts = (acctsJson?.accounts ?? []) as Account[];
-        setCategories(categories);
-        setAccounts(accounts);
-        // Account defaults to Cash — the account named Cash when it
-        // exists, else the first one.
-        const cash = accounts.find((a) => a.name.toLowerCase() === "cash");
-        setAccountId(cash?.id ?? accounts[0]?.id ?? null);
-        setFailed(!catsJson || !acctsJson);
-        setLoaded(true);
-      })
-      .catch(() => {
-        if (!alive) return;
-        setFailed(true);
-        setLoaded(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+    setAccountId((current) => {
+      if (current) return current;
+      const cash = accounts.find((a) => a.name.toLowerCase() === "cash");
+      return cash?.id ?? accounts[0]?.id ?? null;
+    });
+  }, [accounts]);
 
   // Per-account default category: switching accounts swaps in that
   // account's own last-picked category, never another account's.
@@ -156,8 +137,9 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
       if (!res.ok) throw new Error(body?.error ?? "Failed to save");
       const category = body.category as CategoryRow | undefined;
       if (category) {
-        setCategories((current) =>
-          current.some((c) => c.id === category.id) ? current : [...current, category]
+        // The store (and the browser cache) update for every screen.
+        storeCategories(
+          categories.some((c) => c.id === category.id) ? categories : [...categories, category]
         );
         pickCategory(category.id);
       }
@@ -281,7 +263,7 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
             {editing ? (
               <CategoryEditor
                 categories={categories}
-                onChanged={setCategories}
+                onChanged={storeCategories}
                 onBack={() => setEditing(false)}
               />
             ) : (
@@ -369,7 +351,7 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
                 </button>
               ))}
             </div>
-            {loaded && !failed && accounts.length === 0 && (
+            {ready && !failed && accounts.length === 0 && (
               <p className="text-[12px] text-text-faint mt-1.5">
                 No accounts yet — run supabase/seed-trigger.sql to seed them.
               </p>

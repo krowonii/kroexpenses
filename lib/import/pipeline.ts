@@ -1,5 +1,5 @@
 import type { Account, Category } from "@/lib/types";
-import type { ImportIssue, ImportSummary, NormalizedTxn } from "./types";
+import type { ImportIssue, ImportProgress, ImportSummary, NormalizedTxn } from "./types";
 import { parseStatement } from "./parse";
 import { detectFile } from "./detect";
 import { normalizeFile } from "./normalize";
@@ -31,15 +31,23 @@ export interface ImportInput {
  * The import pipeline: parse → normalize → dedupe → transfer reconciliation
  * → categorize (rules, then LLM) → save. Pure business logic, separate from
  * the UI so it can later run asynchronously (queue/Lambda) without changes.
+ * `onProgress` streams stage events (index into IMPORT_STAGES, with an
+ * optional detail line) — the process route forwards them to the client as
+ * SSE, so the import screen shows real movement during the long final stage.
  */
-export async function runImport(input: ImportInput): Promise<ImportSummary> {
+export async function runImport(
+  input: ImportInput,
+  onProgress?: (event: ImportProgress) => void
+): Promise<ImportSummary> {
   const issues: ImportIssue[] = [];
   const txns: NormalizedTxn[] = [];
   let saved = false;
   let saveNote: string | undefined;
 
   // 1. Validate + extract + normalize, per file.
-  for (const file of input.files) {
+  for (let f = 0; f < input.files.length; f++) {
+    const file = input.files[f];
+    onProgress?.({ stage: 0, detail: `${f + 1} of ${input.files.length} files` });
     let parsed;
     try {
       parsed = await parseStatement(file.fileName, file.data);
@@ -85,14 +93,23 @@ export async function runImport(input: ImportInput): Promise<ImportSummary> {
       });
     }
     txns.push(...normalized);
+    onProgress?.({ stage: 1, detail: `${f + 1} of ${input.files.length} files` });
   }
 
   // 2. Deterministic duplicate detection (in-batch + against the database).
   const { kept, duplicateCount } = dedupe(txns, input.existingKeys);
+  onProgress?.({
+    stage: 2,
+    detail: `${kept.length} kept · ${duplicateCount} duplicates skipped`,
+  });
 
   // 3. Internal transfer reconciliation (fee becomes an expense, legs are
   //    excluded from all totals).
   const reconciled = reconcile(kept);
+  onProgress?.({
+    stage: 3,
+    detail: `${reconciled.transferCount} transfer pairs`,
+  });
 
   // 4. Categorize: learned rules, then built-in keyword rules…
   const ruleHits = categorizeWithRules(kept, input.categories, input.rules);
@@ -100,7 +117,10 @@ export async function runImport(input: ImportInput): Promise<ImportSummary> {
   // 5. …then the LLM for whatever the rules missed (only when configured).
   let llmAuto = 0;
   if (llmConfigured()) {
-    const llm = await categorizeWithLlm(kept, input.categories);
+    onProgress?.({ stage: 4 });
+    const llm = await categorizeWithLlm(kept, input.categories, (detail) =>
+      onProgress?.({ stage: 4, detail })
+    );
     llmAuto = llm.auto;
     if (!llm.ok) {
       issues.push({
@@ -117,6 +137,7 @@ export async function runImport(input: ImportInput): Promise<ImportSummary> {
 
   // 7. Save the resulting transactions (only when the database is ready).
   if (input.dbReady) {
+    onProgress?.({ stage: 5 });
     const result = await saveBatch(kept, {
       fileNames: input.files.map((f) => f.fileName),
       duplicateCount,

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Panel } from "@/components/ui";
+import { truncateName } from "@/lib/format";
 import type { ImportSummary } from "@/lib/import/types";
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -64,8 +65,16 @@ export function ImportSummaryView({
           <div className="mb-1.5 text-[12.5px] font-medium">Issues</div>
           <ul className="flex flex-col gap-1">
             {summary.issues.map((issue, index) => (
-              <li key={index} className="text-[12px] text-expense">
-                {issue.fileName} — {issue.stage}: {issue.message}
+              <li
+                key={index}
+                className="grid grid-cols-[minmax(0,150px)_1fr] gap-2 text-[12px] text-expense"
+              >
+                <span className="truncate" title={issue.fileName}>
+                  {truncateName(issue.fileName)}
+                </span>
+                <span className="min-w-0">
+                  {issue.stage}: {issue.message}
+                </span>
               </li>
             ))}
           </ul>

@@ -1,23 +1,32 @@
 "use client";
 
 import { Panel, PanelHead } from "@/components/ui";
+import { IMPORT_STAGES } from "@/lib/import/types";
 
-/** The pipeline stages shown while an import runs on the server. */
-export const IMPORT_STAGES = [
-  "Reading statements",
-  "Extracting transactions",
-  "Checking duplicates",
-  "Reconciling transfers",
-  "Categorizing transactions",
-  "Saving transactions",
-] as const;
+export { IMPORT_STAGES };
 
-export function ProcessingState({ activeIndex }: { activeIndex: number }) {
+/**
+ * The pipeline stages shown while an import runs on the server. The stage
+ * checklist is driven by the pipeline's streamed progress (not a timer), so
+ * it tracks the real work — the categorization stage shows its sub-progress
+ * and any rate-limit waits instead of sitting still.
+ */
+export function ProcessingState({
+  activeIndex,
+  detail,
+  elapsed,
+}: {
+  activeIndex: number;
+  detail?: string | null;
+  elapsed?: number;
+}) {
   return (
     <Panel>
       <PanelHead
         title="Processing import"
-        hint="this usually takes a few seconds"
+        hint={
+          elapsed && elapsed > 0 ? `${elapsed}s elapsed` : "this usually takes a few seconds"
+        }
       />
       <ul>
         {IMPORT_STAGES.map((stage, index) => {
@@ -37,6 +46,11 @@ export function ProcessingState({ activeIndex }: { activeIndex: number }) {
               >
                 {stage}
               </span>
+              {active && detail ? (
+                <span className="ml-auto text-right font-mono text-[11.5px] text-text-dim">
+                  {detail}
+                </span>
+              ) : null}
             </li>
           );
         })}

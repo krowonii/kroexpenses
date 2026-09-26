@@ -21,8 +21,9 @@ function escapePattern(text: string): string {
 
 /**
  * The review queue: low-confidence transactions (pending_review) plus
- * transfer-like rows with no counterpart (unmatched), with the user's
- * categories alongside for the pickers. Empty when the database is
+ * transfer-like rows with no counterpart (unmatched). Categories are NOT
+ * returned — the client's shared store holds them (preloaded at app
+ * boot), so this route stays one query. Empty when the database is
  * unreachable or not signed in.
  */
 export async function GET() {
@@ -30,32 +31,49 @@ export async function GET() {
     const { createClient } = await import("@/lib/supabase/server");
     const supabase = await createClient();
 
-    const [txnsRes, catsRes] = await Promise.all([
-      supabase
-        .from("transactions")
-        .select(
-          "id,txn_date,txn_time,amount,txn_type,status,direction,confidence,merchant,description,category:categories(id,name),account:accounts(name)"
-        )
-        // pending_review + unmatched, plus any expense that ended up with
-        // no category at all (an interrupted AI pass, or a later category
-        // delete nulling category_id) — those need the user too, and a
-        // re-import can't fix them (dedupe skips already-imported rows).
-        // Excluded rows leave all totals and are configured on the ledger,
-        // so they never queue back in.
-        .or("status.in.(pending_review,unmatched),and(txn_type.eq.expense,category_id.is.null,status.ne.excluded)")
-        .order("txn_date", { ascending: false })
-        .order("txn_time", { ascending: false, nullsFirst: false }),
-      supabase.from("categories").select("id,name,color").order("sort_order"),
-    ]);
-    if (txnsRes.error || catsRes.error) throw txnsRes.error ?? catsRes.error;
+    const txnsRes = await supabase
+      .from("transactions")
+      .select(
+        "id,txn_date,txn_time,amount,txn_type,status,direction,confidence,merchant,description,category:categories(id,name),account:accounts(name)"
+      )
+      // pending_review + unmatched, plus any expense that ended up with
+      // no category at all (an interrupted AI pass, or a later category
+      // delete nulling category_id) — those need the user too, and a
+      // re-import can't fix them (dedupe skips already-imported rows).
+      // Excluded rows leave all totals and are configured on the ledger,
+      // so they never queue back in. Note: the not-equal operator is
+      // "neq" — "ne" isn't a PostgREST operator and fails the whole
+      // .or() parse (PGRST100), which the catch used to swallow into an
+      // empty list.
+      .or("status.in.(pending_review,unmatched),and(txn_type.eq.expense,category_id.is.null,status.neq.excluded)")
+      .order("txn_date", { ascending: false })
+      .order("txn_time", { ascending: false, nullsFirst: false });
+    if (txnsRes.error) throw txnsRes.error;
 
     return Response.json({
       items: (txnsRes.data ?? []) as unknown as ReviewItem[],
-      categories: catsRes.data ?? [],
     });
-  } catch {
-    return Response.json({ items: [], categories: [] });
+  } catch (error) {
+    // Log so a broken query is diagnosable — the empty response is the
+    // signed-out/unreachable design, but a parse failure used to land
+    // here silently.
+    console.error("[review]", errorMessage(error));
+    return Response.json({ items: [] });
   }
+}
+
+/** Unwrap an error into a readable message — PostgREST/Supabase errors
+ *  are plain objects, not Error instances. */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const e = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const parts = [e.message, e.details, e.hint].filter(
+      (p) => typeof p === "string" && p
+    );
+    if (parts.length > 0) return parts.join(" — ");
+  }
+  return String(error);
 }
 
 /**

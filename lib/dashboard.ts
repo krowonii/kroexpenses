@@ -78,11 +78,18 @@ export function todayIso(): string {
 
 const toIso = (date: Date) => date.toISOString().slice(0, 10);
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Range for a dashboard period. `prev` is the comparable previous period
- * (null for a custom range — no delta baseline).
+ * (null for a custom range — no delta baseline). A custom range uses the
+ * dates the picker picked when given, else falls back to a trailing
+ * 90-day window.
  */
-export function buildRange(period: PeriodKey): {
+export function buildRange(
+  period: PeriodKey,
+  custom?: { from: string; to: string }
+): {
   from: string;
   to: string;
   label: string;
@@ -112,10 +119,21 @@ export function buildRange(period: PeriodKey): {
     };
   }
 
-  // Custom: a trailing 90-day window (no date picker yet).
-  const to = new Date(Date.UTC(y, m - 1, d));
-  const from = new Date(to.getTime() - 89 * 86_400_000);
-  return { from: toIso(from), to: toIso(to), label: rangeLabel(from, to), prev: null };
+  // Custom: the picked range when it's a valid date pair (the picker
+  // always sends one), else a trailing 90-day window. No delta baseline.
+  const fallbackTo = new Date(Date.UTC(y, m - 1, d));
+  const fallbackFrom = new Date(fallbackTo.getTime() - 89 * 86_400_000);
+  const fromStr =
+    custom && ISO_DATE.test(custom.from) && ISO_DATE.test(custom.to) && custom.from <= custom.to
+      ? custom.from
+      : toIso(fallbackFrom);
+  const toStr = custom && fromStr === custom.from ? custom.to : toIso(fallbackTo);
+  return {
+    from: fromStr,
+    to: toStr,
+    label: rangeLabel(new Date(`${fromStr}T00:00:00Z`), new Date(`${toStr}T00:00:00Z`)),
+    prev: null,
+  };
 }
 
 /** "↑ 4% vs last month" — a dash when there's no baseline to compare against. */

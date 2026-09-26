@@ -1,6 +1,7 @@
 "use client";
 
 import { Panel, PanelHead } from "@/components/ui";
+import { truncateName } from "@/lib/format";
 
 export interface HistoryRow {
   id: string;
@@ -35,8 +36,8 @@ export function ImportHistory({ imports }: { imports: HistoryRow[] }) {
                 className={`flex items-center gap-3 py-2.5 ${last ? "" : "border-b border-border-soft"}`}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12.5px] font-medium">
-                    {row.file_name}
+                  <div className="truncate text-[12.5px] font-medium" title={row.file_name}>
+                    {truncateName(row.file_name)}
                   </div>
                   <div className="mt-0.5 font-mono text-[11px] text-text-faint">
                     {new Date(row.created_at).toLocaleString("en-PH", {

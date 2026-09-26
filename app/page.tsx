@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DashboardHeader, type PeriodKey } from "@/components/dashboard/header";
 import { ReviewBanner } from "@/components/dashboard/review-banner";
 import { SummaryCards } from "@/components/dashboard/summary-cards";
@@ -14,17 +14,29 @@ import { emptyDashboard, type DashboardData } from "@/lib/dashboard";
 
 export default function DashboardPage() {
   const [period, setPeriod] = useState<PeriodKey>("thisMonth");
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [data, setData] = useState<DashboardData>(emptyDashboard("…"));
   const [dbReady, setDbReady] = useState(true);
   const [pending, setPending] = useState(true);
+
+  // What the previous render had — a range re-applied while already on
+  // custom refreshes in place; everything else (mount, period switch,
+  // applying from another tab) shows skeletons.
+  const prev = useRef({ period, customRange });
 
   useEffect(() => {
     let alive = true;
     const load = (silent = false) => {
       // Skeletons for the initial load and period switches; a live
-      // refresh (manual add / review decision) updates in place instead.
+      // refresh (manual add / review decision / range re-apply) updates
+      // in place instead.
       if (!silent) setPending(true);
-      fetch(`/api/summary?period=${period}`)
+      const params = new URLSearchParams({ period });
+      if (period === "custom" && customRange) {
+        params.set("from", customRange.from);
+        params.set("to", customRange.to);
+      }
+      fetch(`/api/summary?${params.toString()}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((json) => {
           if (!alive) return;
@@ -39,7 +51,10 @@ export default function DashboardPage() {
           setPending(false);
         });
     };
-    load();
+    const silent =
+      prev.current.period === period && prev.current.customRange !== customRange;
+    prev.current = { period, customRange };
+    load(!silent);
     // Manual adds (and review decisions) announce themselves so the
     // dashboard updates without leaving the page.
     const onChanged = () => load(true);
@@ -48,14 +63,19 @@ export default function DashboardPage() {
       alive = false;
       window.removeEventListener("expenses:changed", onChanged);
     };
-  }, [period]);
+  }, [period, customRange]);
 
   return (
     <div className="max-w-[1180px] mx-auto pt-7 px-6 pb-16 max-[520px]:pt-5 max-[520px]:px-3.5 max-[520px]:pb-12">
       <DashboardHeader
         period={period}
         rangeLabel={pending ? "…" : data.rangeLabel}
+        customRange={customRange}
         onPeriodChange={setPeriod}
+        onCustomApply={(range) => {
+          setCustomRange(range);
+          setPeriod("custom");
+        }}
       />
 
       {!dbReady && (

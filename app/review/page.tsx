@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PageShell, Panel, PanelHead, chipClass } from "@/components/ui";
+import { useAppData, storeCategories } from "@/lib/app-data";
 import { signedPeso, timeLabel } from "@/lib/format";
 
 interface ReviewItem {
@@ -160,7 +161,9 @@ function AddCategoryRow({
  */
 export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  // The user's categories come from the shared store — preloaded at app
+  // boot; the review API no longer re-fetches them per visit.
+  const { categories } = useAppData();
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [addingFor, setAddingFor] = useState<string | null>(null);
   const [addName, setAddName] = useState("");
@@ -176,7 +179,6 @@ export default function ReviewPage() {
       .then((json) => {
         if (!alive) return;
         setItems((json?.items ?? []) as ReviewItem[]);
-        setCategories((json?.categories ?? []) as Category[]);
         setFailed(!json);
         setLoaded(true);
       })
@@ -256,8 +258,9 @@ export default function ReviewPage() {
       if (!res.ok) throw new Error(body?.error ?? "Failed to save");
       const category = body.category as Category | undefined;
       if (category) {
-        setCategories((current) =>
-          current.some((c) => c.id === category.id) ? current : [...current, category]
+        // The store (and the browser cache) update for every screen.
+        storeCategories(
+          categories.some((c) => c.id === category.id) ? categories : [...categories, category]
         );
         // The new category is picked for the transaction being reviewed.
         setPicks((current) => ({ ...current, [forItemId]: category.id }));

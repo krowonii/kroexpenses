@@ -4,17 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PageShell, Panel, PanelHead } from "@/components/ui";
 import { UploadArea } from "@/components/import/upload-area";
 import { FileReview } from "@/components/import/file-review";
-import { ProcessingState, IMPORT_STAGES } from "@/components/import/processing-state";
+import { ProcessingState } from "@/components/import/processing-state";
 import { ImportSummaryView } from "@/components/import/import-summary";
 import { ImportHistory, type HistoryRow } from "@/components/import/import-history";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { useAppData } from "@/lib/app-data";
 import { DEFAULT_ACCOUNTS } from "@/lib/defaults";
-import type { Account } from "@/lib/types";
 import type { DetectedFile, ImportSummary } from "@/lib/import/types";
 
 type Screen = "upload" | "reviewing" | "processing" | "done";
-
-const STAGE_INTERVAL_MS = 650;
 
 /**
  * Import flow: Upload → Confirm → Wait → Results → Review exceptions.
@@ -25,25 +23,20 @@ export default function ImportPage() {
   const [screen, setScreen] = useState<Screen>("upload");
   const [detected, setDetected] = useState<DetectedFile[]>([]);
   const [selections, setSelections] = useState<Record<string, string>>({});
-  const [accounts, setAccounts] = useState<Account[]>(DEFAULT_ACCOUNTS);
   const [activeStage, setActiveStage] = useState(0);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const staged = useRef<File[]>([]);
 
-  // Accounts + history come from the database when it is connected;
-  // both fall back to the starter list / empty state otherwise.
-  useEffect(() => {
-    if (!isSupabaseConfigured()) return;
-    fetch("/api/accounts")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.accounts?.length) setAccounts(data.accounts);
-      })
-      .catch(() => {});
-  }, []);
+  // Accounts come from the shared store (preloaded at app boot); while
+  // the database isn't connected the store is empty and the starter list
+  // takes over.
+  const { accounts: dbAccounts } = useAppData();
+  const accounts = dbAccounts.length > 0 ? dbAccounts : DEFAULT_ACCOUNTS;
 
   const refreshHistory = useCallback(() => {
     if (!isSupabaseConfigured()) return;
@@ -132,13 +125,12 @@ export default function ImportPage() {
     if (processable.length === 0) return;
     setScreen("processing");
     setActiveStage(0);
+    setDetail(null);
+    setElapsed(0);
     setError(null);
 
-    // Stage checklist advances while the request runs; the response
-    // completes it.
-    const timer = setInterval(() => {
-      setActiveStage((index) => Math.min(index + 1, IMPORT_STAGES.length - 1));
-    }, STAGE_INTERVAL_MS);
+    // Elapsed ticks every second while the request runs.
+    const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
 
     try {
       const formData = new FormData();
@@ -160,15 +152,49 @@ export default function ImportPage() {
         method: "POST",
         body: formData,
       });
-      const data = await res.json();
       if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
         throw new Error(data?.error ?? `Import failed (${res.status})`);
       }
+      if (!res.body) throw new Error("Import stream unavailable");
 
-      setSummary(data as ImportSummary);
-      setActiveStage(IMPORT_STAGES.length);
-      setScreen("done");
-      refreshHistory();
+      // Server-Sent Events: progress frames drive the stage checklist as
+      // the pipeline runs, then either a summary completes the flow or an
+      // error fails it.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const line = frame.replace(/^data: /, "").trim();
+          if (!line) continue;
+          const event = JSON.parse(line) as {
+            stage?: number;
+            detail?: string;
+            summary?: ImportSummary;
+            error?: string;
+          };
+          if (event.error) throw new Error(event.error);
+          if (event.summary) {
+            setSummary(event.summary);
+            setScreen("done");
+            refreshHistory();
+            return;
+          }
+          if (event.stage !== undefined) {
+            setActiveStage(event.stage);
+            setDetail(event.detail ?? null);
+          }
+        }
+      }
+      throw new Error("Import ended without a result");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setScreen("reviewing");
@@ -193,8 +219,11 @@ export default function ImportPage() {
         </div>
       ) : null}
 
+      {/* min-w-0 on both columns — grid items keep min-width: auto, so a
+          long unbreakable filename would otherwise blow the track out
+          before any truncate deeper in could apply. */}
       <div className="grid grid-cols-[1.65fr_1fr] gap-3 max-[860px]:grid-cols-1">
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
           {screen === "upload" ? <UploadArea onFiles={handleFiles} busy={busy} /> : null}
 
           {screen === "reviewing" ? (
@@ -211,14 +240,16 @@ export default function ImportPage() {
             />
           ) : null}
 
-          {screen === "processing" ? <ProcessingState activeIndex={activeStage} /> : null}
+          {screen === "processing" ? (
+            <ProcessingState activeIndex={activeStage} detail={detail} elapsed={elapsed} />
+          ) : null}
 
           {screen === "done" && summary ? (
             <ImportSummaryView summary={summary} onDone={reset} />
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
           {screen === "reviewing" ? (
             <Panel>
               <PanelHead

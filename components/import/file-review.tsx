@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import type { DetectedFile } from "@/lib/import/types";
+import { truncateName } from "@/lib/format";
 
 const SOURCE_LABEL: Record<string, string> = {
   bdo: "BDO",
@@ -64,8 +65,11 @@ export function FileReview({
               <span className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] text-text-dim">
                 {SOURCE_LABEL[file.source] ?? "Other"}
               </span>
-              <span className="flex-1 truncate text-[12.5px] font-medium">
-                {file.fileName}
+              <span
+                className="min-w-0 flex-1 truncate text-[12.5px] font-medium"
+                title={file.fileName}
+              >
+                {truncateName(file.fileName)}
               </span>
               <button
                 type="button"

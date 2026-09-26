@@ -62,6 +62,25 @@ export interface ImportIssue {
   message: string;
 }
 
+/** The pipeline stages, in order — shared between the pipeline (which
+ *  reports progress by index) and the import screen (which labels them). */
+export const IMPORT_STAGES = [
+  "Reading statements",
+  "Extracting transactions",
+  "Checking duplicates",
+  "Reconciling transfers",
+  "Categorizing transactions",
+  "Saving transactions",
+] as const;
+
+/** Progress event streamed to the client while an import runs. */
+export interface ImportProgress {
+  /** Index into IMPORT_STAGES. */
+  stage: number;
+  /** Optional sub-progress line under the active stage. */
+  detail?: string;
+}
+
 export interface CategorizationOutcome {
   /** Categorized without the user (rules + high-confidence AI). */
   auto: number;

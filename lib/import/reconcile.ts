@@ -2,8 +2,8 @@ import type { NormalizedTxn } from "./types";
 
 /** Maximum fee (outgoing − incoming) tolerated for a matched transfer, in pesos. */
 const MAX_FEE = 100;
-/** Days two legs of one transfer may drift apart across statements. */
-const DATE_WINDOW_DAYS = 3;
+/** Days two legs of one transfer may drift apart across statements (±2 days). */
+const DATE_WINDOW_DAYS = 2;
 
 /** Transfer-like wording that, WITHOUT a counterpart, means external transfer.
  *  Includes BDO's jargon (POB IBFT sends, W/D FR SAV savings/ATM withdrawals)
@@ -13,6 +13,23 @@ const TRANSFER_WORDS =
 
 function daysBetween(a: string, b: string): number {
   return Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
+}
+
+/** Whether two descriptions share supporting evidence — a token of 3+ chars
+ *  (bank names, reference numbers) appearing in both. Used to break ties
+ *  when several candidates match on amount and date alone. */
+function sharedEvidence(a: string, b: string): boolean {
+  const tokens = (s: string) =>
+    new Set(
+      s
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((t) => t.length >= 3)
+    );
+  const at = tokens(a);
+  const bt = tokens(b);
+  for (const token of at) if (bt.has(token)) return true;
+  return false;
 }
 
 export interface ReconcileResult {
@@ -47,7 +64,10 @@ export function reconcile(txns: NormalizedTxn[]): ReconcileResult {
     const out = txns[i];
     if (out.direction !== "out" || out.txn_type === "transfer") continue;
 
-    let match: number | null = null;
+    // Candidates: amount within the fee tolerance AND dates inside the
+    // window; description evidence then breaks ties (a bank cash-in from
+    // the same bank as the send beats an unrelated same-day deposit).
+    const candidates: number[] = [];
     for (let j = 0; j < incoming.length; j++) {
       const inc = incoming[j];
       if (used.has(j) || inc.txn_type === "transfer") continue;
@@ -56,9 +76,13 @@ export function reconcile(txns: NormalizedTxn[]): ReconcileResult {
       const fee = Math.abs(out.amount) - inc.amount;
       if (fee < 0 || fee > MAX_FEE) continue;
       if (daysBetween(out.txn_date, inc.txn_date) > DATE_WINDOW_DAYS) continue;
-      match = j;
-      break;
+      candidates.push(j);
     }
+    const match =
+      candidates.find((j) =>
+        sharedEvidence(out.description ?? "", incoming[j].description ?? "")
+      ) ??
+      (candidates.length > 0 ? candidates[0] : null);
 
     if (match === null) {
       if (TRANSFER_WORDS.test(out.description)) {

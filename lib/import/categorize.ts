@@ -151,6 +151,13 @@ function retrySeconds(message: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** A daily-limit 429 ("20 requests per day on Free Tier") never resets in
+ *  a retry window — it clears at midnight PT — so retrying just burns
+ *  more of the quota. Per-minute limits still wait out fine. */
+function isDailyLimit(message: string): boolean {
+  return /per day|daily/i.test(message);
+}
+
 /** A 429 rate-limit rejection — the SDK may surface it as an ApiError, a
  *  subclass, or a plain object, so check status and message. */
 function isRateLimitError(error: unknown): boolean {
@@ -158,26 +165,53 @@ function isRateLimitError(error: unknown): boolean {
   return /rate limit/i.test(error instanceof Error ? error.message : String(error));
 }
 
-/** Run a call, waiting out free-tier 429s instead of aborting the whole
- *  categorization pass. */
-async function withRateLimitRetry<T>(attempt: () => Promise<T>): Promise<T> {
+/** A transient failure — 5xx or a network drop — is worth one retry;
+ *  4xx rejections are not (the same request fails the same way twice). */
+function isTransient(error: unknown): boolean {
+  const status = (error as { status?: unknown })?.status;
+  if (typeof status === "number" && status >= 500) return true;
+  return /fetch failed|network|econn|socket|timed?out/i.test(
+    error instanceof Error ? error.message : String(error)
+  );
+}
+
+/** Run a call, waiting out per-minute 429s instead of aborting the whole
+ *  categorization pass. `onWait` reports the pause so the import screen
+ *  can show it. Daily-limit rejections throw immediately; other errors
+ *  get one retry (transients recover, 4xxs don't). */
+async function withRateLimitRetry<T>(
+  attempt: () => Promise<T>,
+  onWait?: (seconds: number) => void
+): Promise<T> {
   for (let tries = 0; ; tries++) {
     try {
       return await attempt();
     } catch (error) {
-      const wait = isRateLimitError(error)
-        ? (retrySeconds(error instanceof Error ? error.message : String(error)) ?? 30)
-        : null;
-      if (wait === null || tries >= 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, wait * 1000 + 2_000));
+      const message = error instanceof Error ? error.message : String(error);
+      if (isRateLimitError(error) && !isDailyLimit(message)) {
+        if (tries >= 2) throw error;
+        const wait = retrySeconds(message) ?? 30;
+        onWait?.(wait);
+        await new Promise((resolve) => setTimeout(resolve, wait * 1000 + 2_000));
+        continue;
+      }
+      if (isTransient(error) && tries < 1) {
+        onWait?.(2);
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        continue;
+      }
+      throw error;
     }
   }
 }
 
 /** Transactions per LLM call. Bigger chunks mean fewer requests, which
- *  keeps free-tier limits (5 requests/minute) from breaking an import;
- *  429s that still land are waited out in withRateLimitRetry. */
-const CHUNK_SIZE = Math.max(10, Number(process.env.LLM_CHUNK_SIZE) || 100);
+ *  stretches free-tier quotas — gemini flash tiers cap at 20 requests per
+ *  DAY, so one request per import is the difference between fitting and
+ *  failing. 250 rows ≈ 10K output tokens, well inside the 16K cap; push
+ *  LLM_CHUNK_SIZE higher via env for bigger imports. Remaining 429s are
+ *  handled in withRateLimitRetry. */
+const CHUNK_SIZE = Math.max(10, Number(process.env.LLM_CHUNK_SIZE) || 250);
 
 export interface LlmCategorization {
   ok: boolean;
@@ -191,10 +225,13 @@ export interface LlmCategorization {
  * category list (never a fixed taxonomy). The app — not the model — decides
  * approval: at/above HIGH_CONFIDENCE auto-accepted, below goes to review.
  * Any failure falls back to rules-only results without failing the import.
+ * `onProgress` reports per-chunk sub-progress and rate-limit waits so the
+ * import screen can show real movement during the long final stage.
  */
 export async function categorizeWithLlm(
   txns: NormalizedTxn[],
-  categories: Category[]
+  categories: Category[],
+  onProgress?: (detail: string) => void
 ): Promise<LlmCategorization> {
   const client = new GoogleGenAI({ apiKey: apiKey() });
   const byName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
@@ -203,6 +240,7 @@ export async function categorizeWithLlm(
   );
 
   let auto = 0;
+  const failures: string[] = [];
 
   for (let start = 0; start < pending.length; start += CHUNK_SIZE) {
     const chunk = pending.slice(start, start + CHUNK_SIZE);
@@ -212,35 +250,40 @@ export async function categorizeWithLlm(
     );
 
     try {
-      const interaction = await withRateLimitRetry(() =>
-        client.interactions.create({
-          model: process.env.LLM_MODEL ?? "gemini-3.8-flash",
-          input: `Categories: ${categories.map((c) => c.name).join(", ")}\n\nTransactions:\n${lines.join("\n")}`,
-          system_instruction:
-            "You categorize personal transactions for a Philippine expense tracker. " +
-            "For each transaction, pick the single best category from the provided list. " +
-            "If none fit, pick the closest one and lower the confidence. " +
-            "Respond only with the structured output.",
-          response_format: {
-            type: "text",
-            mime_type: "application/json",
-            schema: RESULT_SCHEMA,
-          },
-          generation_config: { max_output_tokens: 16000 },
-        })
+      const interaction = await withRateLimitRetry(
+        () =>
+          client.interactions.create({
+            model: process.env.LLM_MODEL ?? "gemini-3.8-flash",
+            input: `Categories: ${categories.map((c) => c.name).join(", ")}\n\nTransactions:\n${lines.join("\n")}`,
+            system_instruction:
+              "You categorize personal transactions for a Philippine expense tracker. " +
+              "For each transaction, pick the single best category from the provided list. " +
+              "If none fit, pick the closest one and lower the confidence. " +
+              "Keep each result to its index, category, and confidence — omit the reason field. " +
+              "Respond only with the structured output.",
+            response_format: {
+              type: "text",
+              mime_type: "application/json",
+              schema: RESULT_SCHEMA,
+            },
+            generation_config: { max_output_tokens: 16000 },
+          }),
+        (seconds) => onProgress?.(`rate-limited — waiting ${seconds}s`)
       );
 
       if (interaction.status !== "completed") {
-        return {
-          ok: false,
-          message: `AI categorization failed: interaction ${interaction.status}`,
-          auto,
-        };
+        // One bad chunk costs only its own rows — the rest of the pass
+        // still runs, so a mid-pass failure no longer drops everything.
+        failures.push(`interaction ${interaction.status} — ${chunk.length} rows to review`);
+        onProgress?.(`chunk failed — continuing with the rest`);
+        continue;
       }
 
       const parsed = parseResults(interaction.output_text ?? "");
       if (!parsed) {
-        return { ok: false, message: "Model returned no structured output", auto };
+        failures.push(`no structured output — ${chunk.length} rows to review`);
+        onProgress?.(`chunk failed — continuing with the rest`);
+        continue;
       }
 
       for (const result of parsed) {
@@ -255,15 +298,24 @@ export async function categorizeWithLlm(
           result.confidence >= HIGH_CONFIDENCE ? "categorized" : "pending_review";
         if (txn.status === "categorized") auto++;
       }
+      onProgress?.(
+        `${Math.min(start + CHUNK_SIZE, pending.length)} of ${pending.length} transactions`
+      );
     } catch (error) {
-      // An LLM failure must not fail the import — categorized rows stand,
-      // the rest fall back to review.
-      const detail =
+      // Same isolation on a thrown error: this chunk's rows fall back to
+      // review, the remaining chunks still run, and the import never
+      // fails on categorization.
+      failures.push(
         error instanceof ApiError
-          ? `AI categorization failed (${error.status}): ${error.message}`
-          : `AI categorization failed: ${String(error)}`;
-      return { ok: false, message: detail, auto };
+          ? `${error.status}: ${error.message} — ${chunk.length} rows to review`
+          : `${String(error)} — ${chunk.length} rows to review`
+      );
+      onProgress?.(`chunk failed — continuing with the rest`);
     }
+  }
+
+  if (failures.length > 0) {
+    return { ok: false, message: failures.join(" · "), auto };
   }
 
   return { ok: true, auto };

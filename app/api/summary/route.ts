@@ -29,6 +29,18 @@ function parsePeriod(request: Request): PeriodKey {
   return value === "lastMonth" || value === "custom" ? value : "thisMonth";
 }
 
+/** The picker's from/to for a custom range — null unless both are ISO
+ *  dates and from doesn't land after to (buildRange falls back to a
+ *  trailing 90-day window without them). */
+function parseCustom(request: Request): { from: string; to: string } | null {
+  const params = new URL(request.url).searchParams;
+  const from = params.get("from") ?? "";
+  const to = params.get("to") ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return null;
+  if (from > to) return null;
+  return { from, to };
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
@@ -70,7 +82,8 @@ function aggregate(rows: Row[]) {
  */
 export async function GET(request: Request) {
   const period = parsePeriod(request);
-  const range = buildRange(period);
+  const range =
+    period === "custom" ? buildRange("custom", parseCustom(request) ?? undefined) : buildRange(period);
 
   try {
     const { createClient } = await import("@/lib/supabase/server");

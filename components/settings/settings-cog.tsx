@@ -2,12 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { useAppData, clearAppData } from "@/lib/app-data";
 import { chipClass } from "@/components/ui";
-
-interface Option {
-  id: string;
-  name: string;
-}
 
 /** Gear icon — inline so it takes the button's current color. */
 function GearIcon() {
@@ -39,7 +35,7 @@ export function SettingsCog() {
   const [signedIn, setSignedIn] = useState(false);
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [accounts, setAccounts] = useState<Option[]>([]);
+  const { accounts } = useAppData();
   const [target, setTarget] = useState<string>("all"); // "all" or an account id
   const [count, setCount] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -57,8 +53,8 @@ export function SettingsCog() {
       .catch(() => {}); // unreachable session — stay hidden
   }, []);
 
-  // When the modal opens: load the accounts, and whenever the target
-  // changes, the row count that would be deleted.
+  // When the modal opens and whenever the target changes, the row count
+  // that would be deleted. (Accounts come from the shared store.)
   useEffect(() => {
     if (!open || !signedIn) return;
     setError(null);
@@ -71,16 +67,11 @@ export function SettingsCog() {
       .catch(() => setCount(null));
   }, [open, signedIn, target]);
 
-  useEffect(() => {
-    if (!open || !signedIn) return;
-    fetch("/api/accounts")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json) => setAccounts((json?.accounts ?? []) as Option[]))
-      .catch(() => {});
-  }, [open, signedIn]);
-
   async function signOut() {
     await createClient().auth.signOut();
+    // The cached categories/accounts are per-user — clear them so a
+    // shared browser never shows them to the next sign-in.
+    clearAppData();
     // Full navigation so the proxy sees the cleared session.
     window.location.assign("/login");
   }

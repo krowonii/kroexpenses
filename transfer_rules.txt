@@ -1,0 +1,33 @@
+I need to identify internal transfers between my own accounts so they do NOT count as income or expenses.
+
+Example:
+- BDO: -₱5,015
+- GCash: +₱5,000
+
+This should be classified as:
+- ₱5,000 = INTERNAL_TRANSFER
+- ₱15 = TRANSFER_FEE / EXPENSE
+
+The ₱5,000 transferred from BDO to GCash must NOT appear in my expense or income totals.
+
+For transfer detection, compare transactions across my own accounts using:
+- Opposite transaction direction
+- Matching or near-matching amounts
+- Transaction dates within a small window (e.g. ±2 days)
+- Merchant/description as supporting evidence
+
+Do NOT use the AI to make the final transfer decision if deterministic rules can handle it. The application should perform the actual reconciliation.
+
+Return:
+{
+  "is_internal_transfer": true,
+  "transfer_amount": 5000,
+  "confidence": 0.99,
+  "reason": "BDO has a ₱5,000 outgoing transaction and GCash has a matching ₱5,000 incoming transaction within the allowed date window."
+}
+
+Important:
+- Internal transfers = neither income nor expense.
+- Transfer fees = expense.
+- An unmatched outgoing transfer should remain an expense unless the user later identifies it as a transfer.
+- Never count the same transferred money as both an expense and income.

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { FloatingAdd } from "@/components/expense/add-expense";
+import { AppDataInit } from "@/components/app-data-init";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full">
         {children}
+        <AppDataInit />
         <FloatingAdd />
       </body>
     </html>

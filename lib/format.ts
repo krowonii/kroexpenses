@@ -18,3 +18,10 @@ export function timeLabel(txnTime: string | null | undefined): string {
   const h12 = h % 12 || 12;
   return `${h12}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
 }
+
+/** Cap a long name for inline display — "…" marks the cut, and the full
+ *  value belongs in a title (or similar hover) beside it. */
+export function truncateName(name: string, max = 44): string {
+  if (name.length <= max) return name;
+  return `${name.slice(0, max - 1).trimEnd()}…`;
+}

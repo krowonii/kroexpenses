@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageShell, Panel, chipClass } from "@/components/ui";
 import { TransactionsTable, type TxnRow } from "@/components/dashboard/transactions-table";
+import { useAppData, storeCategories } from "@/lib/app-data";
 import { DAY_SHORT } from "@/lib/dashboard";
 import { timeLabel } from "@/lib/format";
 
@@ -61,6 +62,9 @@ function mapRow(row: TxnApiRow): TxnRow {
  * when a manual add lands from the floating button.
  */
 export function Browser() {
+  // Filter options come from the shared store — preloaded at app boot,
+  // so the filters render immediately instead of fetching.
+  const { categories, accounts } = useAppData();
   // Raw rows — the edit dialog reads the unformatted fields (ISO date,
   // signed amount, category/account ids) straight off these.
   const [raws, setRaws] = useState<TxnApiRow[]>([]);
@@ -72,31 +76,11 @@ export function Browser() {
   const [categoryId, setCategoryId] = useState("");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState(""); // debounced search
-  const [accounts, setAccounts] = useState<Option[]>([]);
-  const [categories, setCategories] = useState<Option[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The row being edited — its dialog state lives alongside.
   const [editing, setEditing] = useState<TxnApiRow | null>(null);
-
-  // Filter options (accounts + the user's categories).
-  useEffect(() => {
-    let alive = true;
-    Promise.all([
-      fetch("/api/accounts").then((res) => (res.ok ? res.json() : null)),
-      fetch("/api/categories").then((res) => (res.ok ? res.json() : null)),
-    ])
-      .then(([acctsJson, catsJson]) => {
-        if (!alive) return;
-        setAccounts((acctsJson?.accounts ?? []) as Option[]);
-        setCategories((catsJson?.categories ?? []) as Option[]);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // Debounce the search box so typing doesn't fire a request per key.
   useEffect(() => {
@@ -429,8 +413,8 @@ export function Browser() {
           onSave={saveEdit}
           onRestore={restoreRow}
           onCategoryCreated={(category) =>
-            setCategories((current) =>
-              current.some((c) => c.id === category.id) ? current : [...current, category]
+            storeCategories(
+              categories.some((c) => c.id === category.id) ? categories : [...categories, category]
             )
           }
         />
