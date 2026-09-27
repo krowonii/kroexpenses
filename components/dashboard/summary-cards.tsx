@@ -10,6 +10,15 @@ export interface SummaryData {
   netDelta: string;
 }
 
+/** Delta color from the delta string's arrow — good/bad for the user,
+ *  not the direction: income up is good, expense up is bad. "—" (no
+ *  baseline, or even) stays flat. */
+function deltaTone(delta: string, goodWhenUp: boolean): "good" | "bad" | "flat" {
+  if (delta.startsWith("↑")) return goodWhenUp ? "good" : "bad";
+  if (delta.startsWith("↓")) return goodWhenUp ? "bad" : "good";
+  return "flat";
+}
+
 export function SummaryCards({ data }: { data: SummaryData }) {
   return (
     <div className="grid grid-cols-3 gap-3 mb-5 max-[860px]:grid-cols-1">
@@ -18,14 +27,14 @@ export function SummaryCards({ data }: { data: SummaryData }) {
         label="Income"
         amount={peso(data.income)}
         delta={data.incomeDelta}
-        deltaTone="up"
+        deltaTone={deltaTone(data.incomeDelta, true)}
       />
       <Card
         tone="expense"
         label="Expenses"
         amount={peso(data.expense)}
         delta={data.expenseDelta}
-        deltaTone="down"
+        deltaTone={deltaTone(data.expenseDelta, false)}
       />
       <Card
         tone="net"

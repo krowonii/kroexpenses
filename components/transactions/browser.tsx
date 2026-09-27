@@ -33,6 +33,7 @@ const TYPES = [
   { value: "expense", label: "Expenses" },
   { value: "income", label: "Income" },
   { value: "transfer", label: "Transfers" },
+  { value: "reimbursement", label: "Reimbursements" },
 ];
 
 const PER_PAGE = [25, 50, 100];
@@ -173,10 +174,11 @@ export function Browser() {
               txn_date: fields.date,
               // The UI edits the magnitude; the stored sign follows the
               // type (or the row's existing sign when the type didn't
-              // change) — income renders green in the table.
+              // change) — income and reimbursements are inflows and render
+              // green in the table.
               txn_type: fields.txnType || r.txn_type,
               amount:
-                (fields.txnType === "income"
+                (fields.txnType === "income" || fields.txnType === "reimbursement"
                   ? 1
                   : fields.txnType === "expense"
                     ? -1
@@ -490,9 +492,12 @@ function EditDialog({
   const [categoryId, setCategoryId] = useState(row.category?.id ?? "");
   const [accountId, setAccountId] = useState(row.account?.id ?? "");
   // Empty = unchanged (a transfer row starts with neither chip picked —
-  // the user moves it to expense/income by tapping, or leaves it).
+  // the user moves it to expense/income/reimbursement by tapping, or
+  // leaves it).
   const [txnType, setTxnType] = useState(
-    row.txn_type === "expense" || row.txn_type === "income" ? row.txn_type : ""
+    row.txn_type === "expense" || row.txn_type === "income" || row.txn_type === "reimbursement"
+      ? row.txn_type
+      : ""
   );
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -634,11 +639,18 @@ function EditDialog({
               >
                 Income
               </button>
+              <button
+                type="button"
+                onClick={() => setTxnType("reimbursement")}
+                className={chipClass(txnType === "reimbursement")}
+              >
+                Reimbursement
+              </button>
             </div>
             {txnType === "" && (
               <p className="text-[11.5px] text-text-faint mt-1.5">
                 This row is a transfer — leave the type, or move it to
-                expense/income.
+                expense, income, or reimbursement.
               </p>
             )}
           </div>

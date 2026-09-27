@@ -32,6 +32,14 @@ function writeDefaults(defaults: Record<string, string>) {
   }
 }
 
+/** The sheet's title, aria-label, and submit label per type — the type
+ *  chips pick it. */
+const TYPE_TITLES: Record<"expense" | "income" | "reimbursement", string> = {
+  expense: "Add expense",
+  income: "Add income",
+  reimbursement: "Add reimbursement",
+};
+
 /**
  * The floating plus button: manual expense entry from any screen. Opens a
  * sheet — a centered dialog on PC, a bottom sheet with a calculator-style
@@ -65,6 +73,7 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
   const { categories, accounts, ready, failed } = useAppData();
   const [date, setDate] = useState(todayIso());
   const [expr, setExpr] = useState("");
+  const [txnType, setTxnType] = useState<"expense" | "income" | "reimbursement">("expense");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -175,7 +184,7 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
       const res = await fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, amount, categoryId, accountId }),
+        body: JSON.stringify({ date, amount, categoryId, accountId, txnType }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? "Failed to save");
@@ -195,11 +204,11 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Add expense"
+        aria-label={TYPE_TITLES[txnType]}
         className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[460px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-md p-[18px] max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-x-0 max-sm:translate-y-0 max-sm:w-auto max-sm:max-w-none max-sm:rounded-t-md max-sm:rounded-b-none max-sm:p-4 max-sm:flex max-sm:flex-col max-sm:max-h-[92dvh]"
       >
         <div className="flex items-center justify-between mb-3.5">
-          <h2 className="text-[13.5px] font-semibold">Add expense</h2>
+          <h2 className="text-[13.5px] font-semibold">{TYPE_TITLES[txnType]}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -211,6 +220,33 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex flex-col gap-3.5 max-sm:overflow-y-auto max-sm:flex-1">
+          <div>
+            <div className="text-[11.5px] text-text-dim mb-1.5">Type</div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setTxnType("expense")}
+                className={chipClass(txnType === "expense")}
+              >
+                Expense
+              </button>
+              <button
+                type="button"
+                onClick={() => setTxnType("income")}
+                className={chipClass(txnType === "income")}
+              >
+                Income
+              </button>
+              <button
+                type="button"
+                onClick={() => setTxnType("reimbursement")}
+                className={chipClass(txnType === "reimbursement")}
+              >
+                Reimbursement
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
             <div>
               <label htmlFor="add-date" className="block text-[11.5px] text-text-dim mb-1">
@@ -364,7 +400,7 @@ function AddExpenseModal({ onClose }: { onClose: () => void }) {
             disabled={busy}
             className="rounded-sm bg-net px-3 py-2.5 text-[13px] font-semibold text-bg hover:opacity-90 disabled:opacity-60"
           >
-            {busy ? "Saving…" : "Add expense"}
+            {busy ? "Saving…" : TYPE_TITLES[txnType]}
           </button>
           {error && <p className="text-[12px] text-expense">{error}</p>}
           {failed && !error && (

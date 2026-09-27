@@ -61,7 +61,7 @@ export function emptyDashboard(label: string): DashboardData {
 /** Date formatters pinned to UTC — the date strings are date-only. */
 export const MONTH_SHORT = new Intl.DateTimeFormat("en-PH", { month: "short", timeZone: "UTC" });
 export const DAY_SHORT = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", timeZone: "UTC" });
-const DAY_YEAR = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+export const DAY_YEAR = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 function rangeLabel(from: Date, to: Date): string {
   const sameMonth =

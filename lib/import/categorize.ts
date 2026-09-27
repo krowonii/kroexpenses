@@ -294,8 +294,13 @@ export async function categorizeWithLlm(
         txn.category_id = category.id;
         txn.category_name = category.name;
         txn.confidence = result.confidence;
+        // "Other" is the AI's catch-all — it picks it overly often, so
+        // anything landing there goes to review with Other pre-picked and
+        // the user confirms (or re-picks) even at high confidence.
         txn.status =
-          result.confidence >= HIGH_CONFIDENCE ? "categorized" : "pending_review";
+          category.name.toLowerCase() === "other" || result.confidence < HIGH_CONFIDENCE
+            ? "pending_review"
+            : "categorized";
         if (txn.status === "categorized") auto++;
       }
       onProgress?.(

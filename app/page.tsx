@@ -8,6 +8,7 @@ import { CategorySpending } from "@/components/dashboard/category-spending";
 import { SpendingOverTime } from "@/components/dashboard/spending-over-time";
 import { IncomeVsExpenses } from "@/components/dashboard/income-vs-expenses";
 import { BudgetProgress } from "@/components/dashboard/budget-progress";
+import { BalancesPanel } from "@/components/dashboard/balances-panel";
 import { TransactionsTable } from "@/components/dashboard/transactions-table";
 import { DashboardSkeleton } from "@/components/dashboard/skeletons";
 import { emptyDashboard, type DashboardData } from "@/lib/dashboard";
@@ -102,6 +103,7 @@ export default function DashboardPage() {
             <div className="flex flex-col gap-3">
               <IncomeVsExpenses weeks={data.weeks} />
               <BudgetProgress budgets={data.budgets} />
+              <BalancesPanel />
             </div>
           </div>
 

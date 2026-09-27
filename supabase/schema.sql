@@ -7,13 +7,17 @@
 -- budgets are optional monthly limits.
 
 create type account_type as enum ('bank', 'ewallet', 'cash', 'credit_card', 'other');
-create type txn_type as enum ('expense', 'income', 'transfer', 'external_transfer');
+-- 'reimbursement' = money received for something someone else paid for
+-- (offsets the expense total — see app/api/summary/route.ts; add to
+-- existing databases with: alter type txn_type add value if not exists 'reimbursement';)
+create type txn_type as enum ('expense', 'income', 'transfer', 'external_transfer', 'reimbursement');
 -- 'excluded' = user-marked to leave all totals until restored
 -- (add to existing databases with: alter type txn_status add value if not exists 'excluded' after 'unmatched';)
 create type txn_status as enum ('categorized', 'pending_review', 'unmatched', 'excluded');
 create type txn_direction as enum ('in', 'out');
 
--- Accounts: provenance only, no balance tracking.
+-- Accounts: provenance + an account-level opening balance (the starting
+-- state — never a transaction).
 create table public.accounts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -21,6 +25,13 @@ create table public.accounts (
   type account_type not null default 'bank',
   institution text,
   is_active boolean not null default true,
+  -- What the account held when tracking began. Null = not set (counts as
+  -- 0). Signed — a credit card can start owing money. Never a transaction
+  -- and never classified as income/expense/transfer.
+  opening_balance numeric(14,2),
+  -- The date the opening balance applies from — only transactions on or
+  -- after it count toward the balance; null = every transaction counts.
+  opening_balance_date date,
   -- Per-account import configuration (e.g. CSV column mapping).
   import_config jsonb not null default '{}',
   created_at timestamptz not null default now()

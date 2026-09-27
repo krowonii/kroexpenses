@@ -47,7 +47,10 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * Aggregate rows into the dashboard numbers. Reconciled transfers are
  * excluded from spending totals; so are user-excluded rows (status
  * excluded — they leave every number until restored); unmatched ones
- * stay counted (masterdoc).
+ * stay counted (masterdoc). Reimbursements (money received for something
+ * someone else paid for) offset the expense total — not income, which
+ * they would inflate, and not byCategory/byDay, where a cross-month
+ * payback would push a category or day negative.
  */
 function aggregate(rows: Row[]) {
   let income = 0;
@@ -59,6 +62,11 @@ function aggregate(rows: Row[]) {
   for (const row of rows) {
     if (row.txn_type === "transfer") continue;
     if (row.status === "excluded") continue;
+    // Signed inflow — subtracted from spending, everything else untouched.
+    if (row.txn_type === "reimbursement") {
+      expense -= row.amount;
+      continue;
+    }
     if (row.amount > 0) {
       income += row.amount;
       byDayIn.set(row.txn_date, (byDayIn.get(row.txn_date) ?? 0) + row.amount);
@@ -113,13 +121,19 @@ export async function GET(request: Request) {
     if (range.prev) {
       const { data: prevData, error: prevError } = await supabase
         .from("transactions")
-        .select("amount,txn_type")
+        // status feeds the excluded check — without it in the select the
+        // cast below claimed a status that was always undefined.
+        .select("amount,txn_type,status")
         .gte("txn_date", range.prev.from)
         .lte("txn_date", range.prev.to);
       if (prevError) throw prevError;
       prevTotals = { income: 0, expense: 0 };
       for (const row of (prevData ?? []) as { amount: number; txn_type: string; status: string }[]) {
         if (row.txn_type === "transfer" || row.status === "excluded") continue;
+        if (row.txn_type === "reimbursement") {
+          prevTotals.expense -= row.amount;
+          continue;
+        }
         if (row.amount > 0) prevTotals.income += row.amount;
         else prevTotals.expense += -row.amount;
       }

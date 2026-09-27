@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PageShell, Panel, PanelHead, chipClass } from "@/components/ui";
 import { useAppData, storeCategories } from "@/lib/app-data";
 import { signedPeso, timeLabel } from "@/lib/format";
@@ -30,6 +30,27 @@ const DATE_FMT = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeri
 
 const inputClass =
   "bg-surface border border-border rounded-sm px-3 py-1.5 text-[12.5px] text-text placeholder:text-text-faint focus:outline-none focus:border-net flex-1 min-w-0";
+
+/** Saved review picks — progress from an unfinished visit, per-device
+ *  (localStorage), like the add sheet's default-category memory. */
+const PICKS_KEY = "review-picks-v1";
+
+function readPicks(): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(PICKS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePicks(picks: Record<string, string>) {
+  try {
+    window.localStorage.setItem(PICKS_KEY, JSON.stringify(picks));
+  } catch {
+    // Private mode / storage blocked — progress just doesn't persist.
+  }
+}
 
 function TxnTitle({ item }: { item: ReviewItem }) {
   return (
@@ -153,11 +174,54 @@ function AddCategoryRow({
 }
 
 /**
+ * The review row's shell — registers its element (for height measuring)
+ * and plays the vanish animation when its id is in `leaving`: fade +
+ * slight shrink, then a collapse to zero height. The parent drops the row
+ * from the list only after the collapse (see confirm()).
+ */
+function LeavingRow({
+  item,
+  register,
+  leaving,
+  children,
+}: {
+  item: ReviewItem;
+  register: (id: string, el: HTMLDivElement | null) => void;
+  leaving: Record<string, number>;
+  children: ReactNode;
+}) {
+  const isLeaving = item.id in leaving;
+  return (
+    <div
+      ref={(el) => {
+        register(item.id, el);
+      }}
+      className="bg-surface-2 border border-border-soft rounded-md px-3.5 py-3 transition-[max-height,opacity,transform] duration-200 ease-out"
+      style={
+        isLeaving
+          ? {
+              maxHeight: leaving[item.id],
+              opacity: 0,
+              transform: "scale(0.97)",
+              overflow: "hidden",
+            }
+          : undefined
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
  * The review queue: one card per transaction that needs the user —
  * low-confidence AI suggestions to confirm or correct, and transfer-like
- * rows with no counterpart. Confirms are optimistic (the row leaves
- * immediately, the save runs behind the scenes) and never lock each
- * other, so several can fire within a short window.
+ * rows with no counterpart. Confirms never lock each other, so several
+ * can fire within a short window; each row vanishes (fade + slight
+ * shrink, then a collapse) before it leaves the list, and the save runs
+ * alongside — a failure cancels the animation and puts the row back.
+ * Picks persist across visits, so review progress survives leaving the
+ * page.
  */
 export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
@@ -171,16 +235,35 @@ export default function ReviewPage() {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Rows playing the vanish animation — id → the height pinned at the
+  // moment the animation started (max-height collapses from there to 0).
+  const [leaving, setLeaving] = useState<Record<string, number>>({});
+  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     let alive = true;
+    // Restore picks saved by an unfinished visit — review progress
+    // survives leaving the page mid-reconciliation.
+    setPicks(readPicks());
     fetch("/api/review")
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
         if (!alive) return;
-        setItems((json?.items ?? []) as ReviewItem[]);
+        const loaded = (json?.items ?? []) as ReviewItem[];
+        setItems(loaded);
         setFailed(!json);
         setLoaded(true);
+        // Prune saved picks to rows still in the queue — a confirmed
+        // item's pick doesn't linger for a future row.
+        const valid = new Set(loaded.map((t) => t.id));
+        setPicks((current) => {
+          const next: Record<string, string> = {};
+          for (const [id, categoryId] of Object.entries(current)) {
+            if (valid.has(id)) next[id] = categoryId;
+          }
+          if (Object.keys(next).length !== Object.keys(current).length) writePicks(next);
+          return next;
+        });
       })
       .catch(() => {
         if (!alive) return;
@@ -200,15 +283,63 @@ export default function ReviewPage() {
   // What Confirm all can apply: items with a category available.
   const confirmable = pending.filter((t) => pickFor(t));
 
-  function onPick(itemId: string, categoryId: string) {
-    setPicks((current) => ({ ...current, [itemId]: categoryId }));
+  /** Every pick change persists — leave mid-review, come back later, the
+   *  choices are still here. */
+  function updatePicks(apply: (current: Record<string, string>) => Record<string, string>) {
+    setPicks((current) => {
+      const next = apply(current);
+      writePicks(next);
+      return next;
+    });
   }
 
-  function confirm(item: ReviewItem, action: "categorize" | "transfer" | "exclude") {
+  function onPick(itemId: string, categoryId: string) {
+    updatePicks((current) => ({ ...current, [itemId]: categoryId }));
+  }
+
+  /** The row shells register here so confirm() can measure a height. */
+  const registerRow = (id: string, el: HTMLDivElement | null) => {
+    if (el) rowRefs.current.set(id, el);
+    else rowRefs.current.delete(id);
+  };
+
+  function confirm(
+    item: ReviewItem,
+    action: "categorize" | "transfer" | "exclude" | "reimbursement"
+  ) {
     setError(null);
     const pick = pickFor(item);
     const index = items.findIndex((t) => t.id === item.id);
-    setItems((current) => current.filter((t) => t.id !== item.id));
+
+    // The vanish: pin the row's height (no visual change), fade + shrink,
+    // then collapse to zero — the row leaves the list only after the
+    // collapse finishes. The POST runs alongside; a failure cancels the
+    // animation and puts the row back.
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const height = rowRefs.current.get(item.id)?.offsetHeight;
+    if (height !== undefined) {
+      setLeaving((current) => ({ ...current, [item.id]: height }));
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (cancelled) return;
+          setLeaving((current) => ({ ...current, [item.id]: 0 }));
+        });
+      });
+    }
+    timer = setTimeout(
+      () => {
+        setItems((current) => current.filter((t) => t.id !== item.id));
+        setLeaving((current) => {
+          if (!(item.id in current)) return current;
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
+      },
+      height !== undefined ? 260 : 0
+    );
+
     void (async () => {
       try {
         const res = await fetch("/api/review", {
@@ -224,8 +355,27 @@ export default function ReviewPage() {
           const body = await res.json().catch(() => null);
           throw new Error(body?.error ?? "Failed to save");
         }
+        // The pick served its purpose — dropped only on success, so a
+        // failed save above keeps the user's choice for the retry.
+        updatePicks((current) => {
+          if (!(item.id in current)) return current;
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
       } catch (err) {
-        // Restore the row where it was and surface the failure.
+        cancelled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        setLeaving((current) => {
+          if (!(item.id in current)) return current;
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
+        // Restore the row where it was and surface the failure — the
+        // guard covers both timings: mid-animation the row is still in
+        // the list and this no-ops (only the styles clear), after the
+        // collapse it re-inserts.
         setItems((current) => {
           if (current.some((t) => t.id === item.id)) return current;
           const next = [...current];
@@ -263,7 +413,7 @@ export default function ReviewPage() {
           categories.some((c) => c.id === category.id) ? categories : [...categories, category]
         );
         // The new category is picked for the transaction being reviewed.
-        setPicks((current) => ({ ...current, [forItemId]: category.id }));
+        updatePicks((current) => ({ ...current, [forItemId]: category.id }));
       }
       setAddName("");
       setAddingFor(null);
@@ -321,9 +471,11 @@ export default function ReviewPage() {
               />
               <div className="flex flex-col gap-2.5">
                 {pending.map((item) => (
-                  <div
+                  <LeavingRow
                     key={item.id}
-                    className="bg-surface-2 border border-border-soft rounded-md px-3.5 py-3"
+                    item={item}
+                    register={registerRow}
+                    leaving={leaving}
                   >
                     <TxnTitle item={item} />
                     <TxnMeta item={item} />
@@ -360,6 +512,15 @@ export default function ReviewPage() {
                       >
                         Mark as transfer
                       </button>
+                      {item.direction === "in" && (
+                        <button
+                          type="button"
+                          onClick={() => confirm(item, "reimbursement")}
+                          className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint"
+                        >
+                          Mark as reimbursement
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => confirm(item, "exclude")}
@@ -368,7 +529,7 @@ export default function ReviewPage() {
                         Exclude
                       </button>
                     </div>
-                  </div>
+                  </LeavingRow>
                 ))}
               </div>
             </Panel>
@@ -388,9 +549,11 @@ export default function ReviewPage() {
               </p>
               <div className="flex flex-col gap-2.5">
                 {unmatched.map((item) => (
-                  <div
+                  <LeavingRow
                     key={item.id}
-                    className="bg-surface-2 border border-border-soft rounded-md px-3.5 py-3"
+                    item={item}
+                    register={registerRow}
+                    leaving={leaving}
                   >
                     <TxnTitle item={item} />
                     <TxnMeta item={item} />
@@ -421,6 +584,15 @@ export default function ReviewPage() {
                       >
                         Mark as transfer
                       </button>
+                      {item.direction === "in" && (
+                        <button
+                          type="button"
+                          onClick={() => confirm(item, "reimbursement")}
+                          className="rounded-sm border border-border px-3 py-1.5 text-[12.5px] text-text-dim hover:text-text hover:border-text-faint"
+                        >
+                          Mark as reimbursement
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => confirm(item, "exclude")}
@@ -429,7 +601,7 @@ export default function ReviewPage() {
                         Exclude
                       </button>
                     </div>
-                  </div>
+                  </LeavingRow>
                 ))}
               </div>
             </Panel>

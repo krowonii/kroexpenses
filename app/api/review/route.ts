@@ -81,15 +81,16 @@ function errorMessage(error: unknown): string {
  * transaction's category and learns it (pattern from the merchant) so
  * future imports need less review; `transfer` marks an unmatched row as a
  * reconciled internal transfer; `exclude` removes the row from all totals
- * until restored (restoring happens on the ledger's edit dialog). Updates
- * are scoped by user_id as well as id.
+ * until restored (restoring happens on the ledger's edit dialog);
+ * `reimbursement` marks an inflow row as a payback for something someone
+ * else paid for. Updates are scoped by user_id as well as id.
  */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       id?: string;
       categoryId?: string | null;
-      action?: "categorize" | "transfer" | "exclude";
+      action?: "categorize" | "transfer" | "exclude" | "reimbursement";
     };
     if (!body.id) {
       return Response.json({ error: "Missing transaction id" }, { status: 400 });
@@ -114,6 +115,38 @@ export async function POST(request: Request) {
       const { error } = await supabase
         .from("transactions")
         .update({ status: "excluded" })
+        .eq("id", body.id)
+        .eq("user_id", userId);
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+
+    if (body.action === "reimbursement") {
+      // Money received for something someone else paid for — a payback.
+      // It reduces the expense total (summary route) instead of inflating
+      // income. Read first: the stored amount flips sign with the
+      // direction (an outflow row's negative amount becomes the payback's
+      // positive one) — direction_matches_amount requires the two to
+      // agree, and abs() leaves an already-inflow row alone.
+      const { data: existing, error: readError } = await supabase
+        .from("transactions")
+        .select("amount")
+        .eq("id", body.id)
+        .eq("user_id", userId)
+        .limit(1);
+      if (readError) throw readError;
+      if (!existing || existing.length === 0) {
+        return Response.json({ error: "Unknown transaction" }, { status: 400 });
+      }
+      const { error } = await supabase
+        .from("transactions")
+        .update({
+          txn_type: "reimbursement",
+          direction: "in",
+          amount: Math.abs(existing[0].amount as number),
+          status: "categorized",
+          confidence: null,
+        })
         .eq("id", body.id)
         .eq("user_id", userId);
       if (error) throw error;

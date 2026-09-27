@@ -43,6 +43,8 @@ export async function GET(request: Request) {
       query = query.eq("txn_type", type);
     } else if (type === "transfer") {
       query = query.in("txn_type", ["transfer", "external_transfer"]);
+    } else if (type === "reimbursement") {
+      query = query.eq("txn_type", "reimbursement");
     }
     if (q) query = query.or(`merchant.ilike.%${q}%,description.ilike.%${q}%`);
 
@@ -63,10 +65,11 @@ export async function GET(request: Request) {
 }
 
 /**
- * Manual expense entry — the floating plus button. Inserts a single
- * transaction with the picked category and account. An explicitly picked
- * category is the user's own categorization (confidence null, status
- * categorized); no category lands it in the review queue.
+ * Manual entry — the floating plus button. Inserts a single transaction
+ * (expense, income, or reimbursement — the sheet's type chips pick it)
+ * with the picked category and account. An explicitly picked category is
+ * the user's own categorization (confidence null, status categorized); no
+ * category lands it in the review queue.
  */
 export async function POST(request: Request) {
   try {
@@ -75,6 +78,7 @@ export async function POST(request: Request) {
       amount?: number;
       categoryId?: string | null;
       accountId?: string;
+      txnType?: string;
     };
 
     const date =
@@ -96,6 +100,23 @@ export async function POST(request: Request) {
     if (!body.accountId) {
       return Response.json({ error: "Pick an account" }, { status: 400 });
     }
+    if (
+      body.txnType !== undefined &&
+      body.txnType !== "expense" &&
+      body.txnType !== "income" &&
+      body.txnType !== "reimbursement"
+    ) {
+      return Response.json(
+        { error: "Type must be expense, income, or reimbursement" },
+        { status: 400 }
+      );
+    }
+    const txnType =
+      body.txnType === "income"
+        ? "income"
+        : body.txnType === "reimbursement"
+          ? "reimbursement"
+          : "expense";
 
     const { createClient } = await import("@/lib/supabase/server");
     const { getUserId } = await import("@/lib/supabase/server");
@@ -142,10 +163,11 @@ export async function POST(request: Request) {
       account_id: body.accountId,
       txn_date: date,
       txn_time: txnTime,
-      amount: -amount, // signed: negative = outflow
-      direction: "out",
+      // Signed: negative = outflow; income and reimbursements are inflows.
+      amount: txnType === "expense" ? -amount : amount,
+      direction: txnType === "expense" ? "out" : "in",
       merchant: "Manual entry",
-      txn_type: "expense",
+      txn_type: txnType,
       category_id: categoryId,
       status: categoryId ? "categorized" : "pending_review",
       source: "manual",
@@ -161,10 +183,10 @@ export async function POST(request: Request) {
 /**
  * Edit an existing transaction: `?id=<uuid>` with any of date, amount
  * (positive; the sign follows the row's effective direction), categoryId,
- * accountId, `txnType` (expense|income — direction follows the type and
- * the stored amount's sign flips to match), or `restore: true` (an
- * excluded row returns to the totals — categorized when it has a
- * category, pending_review when not). Only the fields sent change —
+ * accountId, `txnType` (expense|income|reimbursement — direction follows
+ * the type and the stored amount's sign flips to match), or `restore:
+ * true` (an excluded row returns to the totals — categorized when it has
+ * a category, pending_review when not). Only the fields sent change —
  * otherwise status is untouched, so a pending-review row still resolves
  * in the review queue. The account and category are verified the same
  * way as POST; the row itself is read first, which doubles as the
@@ -200,8 +222,16 @@ export async function PATCH(request: Request) {
     if (body.amount !== undefined && amount === undefined) {
       return Response.json({ error: "Amount must be a positive number" }, { status: 400 });
     }
-    if (body.txnType !== undefined && body.txnType !== "expense" && body.txnType !== "income") {
-      return Response.json({ error: "Type must be expense or income" }, { status: 400 });
+    if (
+      body.txnType !== undefined &&
+      body.txnType !== "expense" &&
+      body.txnType !== "income" &&
+      body.txnType !== "reimbursement"
+    ) {
+      return Response.json(
+        { error: "Type must be expense, income, or reimbursement" },
+        { status: 400 }
+      );
     }
 
     const { createClient, getUserId } = await import("@/lib/supabase/server");
@@ -249,10 +279,12 @@ export async function PATCH(request: Request) {
     const updates: Record<string, unknown> = {};
     if (date !== undefined) updates.txn_date = date;
     // Type change: direction follows the type (normalize couples them —
-    // "in" ↔ income), so income totals count it and the ledger colors it.
+    // "in" ↔ income; a reimbursement is an inflow too), so income totals
+    // count it and the ledger colors it.
     if (body.txnType !== undefined && body.txnType !== existing[0].txn_type) {
       updates.txn_type = body.txnType;
-      updates.direction = body.txnType === "income" ? "in" : "out";
+      updates.direction =
+        body.txnType === "income" || body.txnType === "reimbursement" ? "in" : "out";
     }
     const effectiveDirection = (updates.direction as "in" | "out" | undefined) ?? direction;
     if (amount !== undefined) {

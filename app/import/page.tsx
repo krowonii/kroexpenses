@@ -8,9 +8,12 @@ import { ProcessingState } from "@/components/import/processing-state";
 import { ImportSummaryView } from "@/components/import/import-summary";
 import { ImportHistory, type HistoryRow } from "@/components/import/import-history";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
-import { useAppData } from "@/lib/app-data";
+import { useAppData, storeAccounts } from "@/lib/app-data";
 import { DEFAULT_ACCOUNTS } from "@/lib/defaults";
+import { peso2 } from "@/lib/format";
+import { todayIso } from "@/lib/dashboard";
 import type { DetectedFile, ImportSummary } from "@/lib/import/types";
+import type { Account } from "@/lib/types";
 
 type Screen = "upload" | "reviewing" | "processing" | "done";
 
@@ -37,6 +40,9 @@ export default function ImportPage() {
   // takes over.
   const { accounts: dbAccounts } = useAppData();
   const accounts = dbAccounts.length > 0 ? dbAccounts : DEFAULT_ACCOUNTS;
+
+  // The opening-balance dialog's account — null = closed.
+  const [balanceDialog, setBalanceDialog] = useState<Account | null>(null);
 
   const refreshHistory = useCallback(() => {
     if (!isSupabaseConfigured()) return;
@@ -211,6 +217,21 @@ export default function ImportPage() {
   );
   const canProcess = processable.length > 0 && !needsAccount;
 
+  // Unique real accounts among the files' selections (selections hold
+  // names; two accounts can share a name — the first wins) — the balance
+  // section only covers database accounts, so it disappears while the
+  // store is empty and the starter list is showing.
+  const selectedAccounts: Account[] = [];
+  {
+    const seen = new Set<string>();
+    for (const name of Object.values(selections)) {
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const account = dbAccounts.find((a) => a.name === name);
+      if (account) selectedAccounts.push(account);
+    }
+  }
+
   return (
     <PageShell title="Import">
       {error ? (
@@ -262,6 +283,48 @@ export default function ImportPage() {
                 You will only be asked to review what could not be confidently
                 categorized.
               </p>
+              {selectedAccounts.length > 0 ? (
+                <div className="mb-3.5">
+                  <div className="text-[11.5px] text-text-dim mb-1.5">Opening balance</div>
+                  <div className="flex flex-col gap-1.5">
+                    {selectedAccounts.map((account) => {
+                      const has =
+                        typeof account.opening_balance === "number"
+                          ? account.opening_balance
+                          : null;
+                      return (
+                        <div
+                          key={account.id}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <span
+                            className="text-[12.5px] text-text-dim truncate"
+                            title={account.name}
+                          >
+                            {account.name}
+                          </span>
+                          <span className="flex items-center gap-2.5 shrink-0">
+                            <span
+                              className={`font-mono text-[12px] ${
+                                has !== null && has < 0 ? "text-expense" : "text-text-faint"
+                              }`}
+                            >
+                              {has === null ? "not set" : peso2(has)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setBalanceDialog(account)}
+                              className="text-[12px] text-text-dim hover:text-text"
+                            >
+                              {has === null ? "Set" : "Update"}
+                            </button>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
               <div className="flex gap-2.5">
                 <button
                   type="button"
@@ -300,6 +363,185 @@ export default function ImportPage() {
           <ImportHistory imports={history} />
         </div>
       </div>
+
+      {balanceDialog ? (
+        <OpeningBalanceDialog
+          account={balanceDialog}
+          accounts={dbAccounts}
+          onClose={() => setBalanceDialog(null)}
+        />
+      ) : null}
     </PageShell>
+  );
+}
+
+/**
+ * Slim opening-balance dialog for the import flow — the selected
+ * account's starting value, set or updated without leaving the page (the
+ * full account editor lives on the accounts screen). The opening balance
+ * is signed and its date auto-fills today on first entry; only
+ * transactions on or after the date count toward the balance. Saving
+ * writes through /api/accounts, then updates the shared store and
+ * announces the change so the balances panels refetch.
+ */
+function OpeningBalanceDialog({
+  account,
+  accounts,
+  onClose,
+}: {
+  account: Account;
+  accounts: Account[];
+  onClose: () => void;
+}) {
+  const [opening, setOpening] = useState(
+    typeof account.opening_balance === "number" ? account.opening_balance.toFixed(2) : ""
+  );
+  const [openingDate, setOpeningDate] = useState(account.opening_balance_date ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Esc closes.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function onOpeningChange(value: string) {
+    setOpening(value);
+    // First entry of a balance auto-fills today — never overrides a date
+    // already picked.
+    if (value.trim() && !openingDate) setOpeningDate(todayIso());
+  }
+
+  async function save() {
+    if (busy) return;
+    let balance: number | null = null;
+    let date: string | null = null;
+    if (opening.trim()) {
+      const parsed = Number(opening.trim());
+      if (!Number.isFinite(parsed)) {
+        setError("Opening balance must be a valid amount");
+        return;
+      }
+      if (!openingDate) {
+        setError("An opening-balance date is required with a balance");
+        return;
+      }
+      balance = Math.round(parsed * 100) / 100;
+      date = openingDate;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/accounts?id=${encodeURIComponent(account.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          balance !== null
+            ? { openingBalance: balance, openingBalanceDate: date }
+            : // Empty balance clears it — the date goes with it.
+              { openingBalance: null }
+        ),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? "Failed to save");
+      const saved = body?.account as Account | null;
+      if (saved) {
+        // The store (and the browser cache) update for every screen —
+        // merged against the latest snapshot this render saw.
+        storeAccounts(
+          accounts.some((a) => a.id === saved.id)
+            ? accounts.map((a) => (a.id === saved.id ? saved : a))
+            : [...accounts, saved]
+        );
+      }
+      // The balances panels refetch on this signal.
+      window.dispatchEvent(new Event("expenses:changed"));
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-bg/75" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Opening balance"
+        className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-md p-[18px] max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-x-0 max-sm:translate-y-0 max-sm:w-auto max-sm:max-w-none max-sm:rounded-t-md max-sm:rounded-b-none max-sm:p-4"
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-[13.5px] font-semibold">Opening balance</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="text-[18px] leading-none text-text-faint hover:text-text px-1"
+          >
+            ×
+          </button>
+        </div>
+        <p className="text-[12px] text-text-faint mb-3.5 truncate" title={account.name}>
+          {account.name}
+        </p>
+
+        <div className="flex flex-col gap-3.5">
+          <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            <div>
+              <label htmlFor="import-opening" className="block text-[11.5px] text-text-dim mb-1">
+                Balance
+              </label>
+              <input
+                id="import-opening"
+                type="text"
+                inputMode="decimal"
+                value={opening}
+                onChange={(event) => onOpeningChange(event.target.value)}
+                placeholder="0.00"
+                className="w-full bg-surface-2 border border-border-soft rounded-sm px-3 py-2 text-[13px] font-mono text-text placeholder:text-text-faint focus:outline-none focus:border-net"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="import-opening-date"
+                className="block text-[11.5px] text-text-dim mb-1"
+              >
+                As of date
+              </label>
+              <input
+                id="import-opening-date"
+                type="date"
+                value={openingDate}
+                onChange={(event) => setOpeningDate(event.target.value)}
+                className="w-full bg-surface-2 border border-border-soft rounded-sm px-3 py-2 text-[13px] text-text focus:outline-none focus:border-net"
+              />
+            </div>
+          </div>
+
+          <p className="text-[11.5px] text-text-faint -mt-1.5">
+            Enter the balance you had when you started tracking this account.
+            Negative works too (e.g. a card that starts owing money) — only
+            transactions on or after the date count toward the balance.
+          </p>
+
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy}
+            className="rounded-sm bg-net px-3 py-2.5 text-[13px] font-semibold text-bg hover:opacity-90 disabled:opacity-60"
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+          {error && <p className="text-[12px] text-expense">{error}</p>}
+        </div>
+      </div>
+    </>
   );
 }

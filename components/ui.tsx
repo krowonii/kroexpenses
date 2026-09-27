@@ -95,12 +95,15 @@ export function Card({
   label: string;
   amount: string;
   delta?: string;
-  deltaTone?: "up" | "down" | "flat";
+  /** Good/bad FOR THE USER — decoupled from the arrow's direction (an
+   *  expense increase points up but is bad). good → income green,
+   *  bad → expense red. */
+  deltaTone?: "good" | "bad" | "flat";
 }) {
   const deltaClass =
-    deltaTone === "up"
+    deltaTone === "good"
       ? "text-income"
-      : deltaTone === "down"
+      : deltaTone === "bad"
         ? "text-expense"
         : "text-text-faint";
 

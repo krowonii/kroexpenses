@@ -3,12 +3,15 @@
  * These are the shapes the whole app (imports, reconciliation, dashboard) works with.
  */
 
-/** What a transaction fundamentally is. Transfer fees are expenses. */
+/** What a transaction fundamentally is. Transfer fees are expenses;
+ *  reimbursements are money received for something someone else paid for
+ *  — they offset the expense total (see app/api/summary/route.ts). */
 export type TxnType =
   | "expense"
   | "income"
   | "transfer"
-  | "external_transfer";
+  | "external_transfer"
+  | "reimbursement";
 
 /**
  * Lifecycle status. `unmatched` = transfer with no counterpart found
@@ -25,6 +28,17 @@ export interface Account {
   type: string;
   institution?: string | null;
   is_active: boolean;
+  /**
+   * Account-level starting value — what the account held when tracking
+   * began. Never a transaction; signed (a credit card can start owing
+   * money). Null = not set (counts as 0).
+   */
+  opening_balance?: number | null;
+  /**
+   * The date the opening balance applies from — only transactions on or
+   * after it count toward the balance. Null = every transaction counts.
+   */
+  opening_balance_date?: string | null;
 }
 
 export interface Category {

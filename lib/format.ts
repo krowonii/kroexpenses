@@ -6,6 +6,16 @@ export const peso = (n: number) => {
   );
 };
 
+/** Two-decimal variant for exact amounts (balances): -1250.5 → "-₱1,250.50". */
+export const peso2 = (n: number) => {
+  const sign = n < 0 ? "-" : "";
+  return (
+    sign +
+    "₱" +
+    Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  );
+};
+
 /** Prefix a signed amount with + for inflows, e.g. 17500 → "+₱17,500". */
 export const signedPeso = (n: number) => (n > 0 ? "+" : "") + peso(n);
 
